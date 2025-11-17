@@ -5,28 +5,53 @@ Run to plot a local path from start to goal around elliptical obstacles
 using an attractive + repulsive potential field.
 """
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import Ellipse
 
+os.makedirs("figures", exist_ok=True)
 
-k_att, k_rep, d0, dt = 2.0, 10.0, 2.0, 0.01
-q_goal = np.array([10, 10])
-max_rep_force = 14.0
+q_goal = np.array([10, 10]) # goal position
+q = np.array([0.0, 0.0]) # starting position of the robot
+
+# obstacle coordinates 
 obstacles_true = np.array([[3, 3.5], [6,7], [9,9], [8,4], [5,5]])
 sigma = 0.1  # 10 cm uncertainity
 obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
+
+# obstacle speeds
 obstacle_speeds = np.array([[0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
-q = np.array([0.0, 0.0]) # starting position of the robot
+
+# APF parameters
+k_att, k_rep, d0, dt = 2.0, 10.0, 2.0, 0.01
+max_rep_force = 14.0
 path_data = [q.copy()]
 initial_obstacles = obstacles_true.copy()
 
 # elliptical obstacles
-a = 2.0 # major axis
-b = 1.0 # minor axis
+a0 = 2.0 # major axis (along velocity direction)
+b0 = 1.0 # minor axis (perpendicular to velocity direction)
+alpha = 1.2   # major scaling (large)
+beta  = 0.3   # minor scaling (small)
 
+# each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
+sizes = np.array([1.0, 1.3, 0.8, 1.6, 1.1])
+# incorporate static size
+a_base = a0 * sizes
+b_base = b0 * sizes
+
+
+"""
+Dynamic obstacle modeling:
+1) Velocity is aligned with the major axis of the ellipse. Frep is higher. Hiz yonunde daha fazla itecek.
+2) Buyuk engelden daha itici guc gelecek, a ve b buyuyecek 1/a ve 1/b kuculecek, dE kuculecek, 1/dE buyuyecek.
+Frep artacak.
+3) Hizli engelden daha itici guc gelecek.
+4) Engelin gercek yerini bilmiyoruz. Gaussian noise ekledik. Her zaman adiminda bu pdf'ten bir sample aliyoruz.  
+"""
 
 def attractive_force(q, q_goal):
     F_att = -k_att * (q - q_goal)
@@ -36,12 +61,21 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     F_rep_total = np.array([0.0, 0.0])
     for i, obs in enumerate(obstacles_noisy):
         vx, vy = obstacle_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2) 
         theta = np.arctan2(vy, vx + 1e-12)  # obstacle motion direction
+
+        # dynamic scaling with speed
+        a = a_base[i] + alpha * vmag # major axis (velocity direction)
+        b = b_base[i] + beta  * vmag # minor axis (perpendicular)
 
         # rotate into obstacle frame and calculate the Q matrix
         c, s = np.cos(theta), np.sin(theta)
-        R = np.array([[c, -s],
-                  [s,  c]])
+        
+        # rotation matrix that aligns major axis with velocity
+        R = np.array([[c, s],
+                  [-s,  c]])
+        
+        # Q0 (major axis = a, minor axis = b)
         Q0 = np.diag([1/a**2, 1/b**2])
         Q  = R @ Q0 @ R.T
 
@@ -69,10 +103,13 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
     
     for i, obs in enumerate(obstacles_noisy):
         vx, vy = obstacle_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2) 
         theta = np.arctan2(vy, vx + 1e-12)
+        a = a_base[i] + alpha * vmag 
+        b = b_base[i] + beta  * vmag 
         c, s = np.cos(theta), np.sin(theta)
-        R = np.array([[c, -s],
-                      [s,  c]])
+        R = np.array([[c, s],
+                      [-s,  c]])
         Q0 = np.diag([1/a**2, 1/b**2])
         Q = R @ Q0 @ R.T
         v = q - obs
@@ -167,6 +204,7 @@ ax.set_ylabel('Y')
 ax.set_zlabel('Potential Energy')
 ax.set_title('3D Potential Field Surface')
 ax.legend()
+plt.savefig("figures/fig_3d_potentialsurface.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 
@@ -182,11 +220,13 @@ axs[0].plot(obstacles_noisy[:,0], obstacles_noisy[:,1], 'ro', label='Noisy Cente
 
 axs[0].plot(q_goal[0], q_goal[1], 'go', label='Goal')
 
-
 # --- draw ellipses for TRUE obstacles
 for i, obs in enumerate(obstacles_true):
     vx, vy = obstacle_speeds[i]
+    vmag = np.sqrt(vx**2 + vy**2)
     theta = np.degrees(np.arctan2(vy, vx + 1e-12))
+    a = a_base[i] + alpha * vmag
+    b = b_base[i] + beta  * vmag
     ellipse = Ellipse(
         xy=(obs[0], obs[1]),
         width=2*a, height=2*b,
@@ -209,8 +249,8 @@ axs[1].set_xlabel("X")
 axs[1].set_ylabel("Y")
 
 plt.tight_layout()
+plt.savefig("figures/fig_contour_force.png", dpi=300, bbox_inches='tight')
 plt.show()
-
 
 # ---- 3️⃣ 3D Path over Potential Surface ----
 fig = plt.figure()
@@ -239,4 +279,5 @@ ax.set_ylabel('Y')
 ax.set_zlabel('Potential')
 ax.set_title('3D Potential Field with Path')
 ax.legend()
+plt.savefig("figures/fig_3d_path.png", dpi=300, bbox_inches='tight')
 plt.show()

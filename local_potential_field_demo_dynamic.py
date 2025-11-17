@@ -24,6 +24,7 @@ obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.sha
 
 # obstacle speeds
 obstacle_speeds = np.array([[0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
+obstacle_speeds = obstacle_speeds * 5
 
 # APF parameters
 k_att, k_rep, d0, dt = 2.0, 10.0, 2.0, 0.01
@@ -82,7 +83,10 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
         # elliptical distance
         dE = np.sqrt(float((q - obs).T @ Q @ (q - obs)) + 1e-12)
 
-        if dE < d0:
+        # dynamic avoidance boundary
+        d0_i = 1.2 * max(a, b)
+
+        if dE < d0_i:
             F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
             # yön vektörü (normalize edilmiş fark)
             grad_Dq = Q @ (q - obs) / (dE + 1e-12)
@@ -95,7 +99,6 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
             F_rep = np.array([0.0, 0.0])
         F_rep_total += F_rep
     return F_rep_total
-
 
 def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
     U_rep_total = 0
@@ -114,12 +117,15 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
         Q = R @ Q0 @ R.T
         v = q - obs
         dE = np.sqrt(float(v.T @ Q @ v) + 1e-12)
+        
+        # dynamic avoidance boundary
+        d0_i = 1.2 * max(a, b)
+
         if dE < 1e-6:  # avoid division by zero
             dE = 1e-6
-        U_rep = 0.5 * k_rep * (1/dE - 1/d0)**2 if dE < d0 else 0
+        U_rep = 0.5 * k_rep * (1/dE - 1/d0)**2 if dE < d0_i else 0
         U_rep_total += U_rep
     return U_att + U_rep_total
-
 
 def total_force(q, q_goal, obstacles_noisy, obstacle_speeds):
     """
@@ -129,8 +135,8 @@ def total_force(q, q_goal, obstacles_noisy, obstacle_speeds):
     F_rep = repulsive_force(q, obstacles_noisy, obstacle_speeds)
     return F_att + F_rep
 
-x_range = np.linspace(-5, 15, 50) #-5 ile 15 arasinda 50 esit parca olustur.
-y_range = np.linspace(-5, 15, 50)
+x_range = np.linspace(-25, 25, 50) #-5 ile 15 arasinda 50 esit parca olustur.
+y_range = np.linspace(-25, 25, 50)
 X, Y = np.meshgrid(x_range, y_range)
 Z = np.zeros_like(X)
 U = np.zeros_like(X)

@@ -15,15 +15,15 @@ from matplotlib.patches import Ellipse
 os.makedirs("figures", exist_ok=True)
 
 q_goal = np.array([10, 10]) # goal position
-q = np.array([0.0, 0.0]) # starting position of the robot
+q = np.array([-20.0, -20.0]) # starting position of the robot
 
 # obstacle coordinates 
-obstacles_true = np.array([[3, 3.5], [6,7], [9,9], [8,4], [5,5]])
+obstacles_true = np.array([[-5,-5], [-3,-3], [3, 3.5], [6,7], [9,9], [8,4], [5,5]])
 sigma = 0.1  # 10 cm uncertainity
 obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 
 # obstacle speeds
-obstacle_speeds = np.array([[0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
+obstacle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
 obstacle_speeds = obstacle_speeds * 5
 
 # APF parameters
@@ -39,7 +39,7 @@ alpha = 1.2   # major scaling (large)
 beta  = 0.3   # minor scaling (small)
 
 # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-sizes = np.array([1.0, 1.3, 0.8, 1.6, 1.1])
+sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1])
 # incorporate static size
 a_base = a0 * sizes
 b_base = b0 * sizes

@@ -135,8 +135,71 @@ def total_force(q, q_goal, obstacles_noisy, obstacle_speeds):
     F_rep = repulsive_force(q, obstacles_noisy, obstacle_speeds)
     return F_att + F_rep
 
-x_range = np.linspace(-25, 25, 50) #-5 ile 15 arasinda 50 esit parca olustur.
-y_range = np.linspace(-25, 25, 50)
+def resolve_obstacle_collisions(obstacles_true, obstacle_speeds):
+    N = len(obstacles_true)
+
+    # --- compute dynamic radii ---
+    radii = np.zeros(N)
+    for i in range(N):
+        vx, vy = obstacle_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2)
+
+        a_i = a_base[i] + alpha * vmag
+        b_i = b_base[i] + beta  * vmag
+
+        # realistic effective radius = max(axis lengths)
+        radii[i] = max(a_i, b_i)
+
+    # --- pairwise collision check ---
+    for i in range(N):
+        for j in range(i+1, N):
+
+            difference = obstacles_true[i] - obstacles_true[j]
+            distance = np.linalg.norm(difference)
+            allowed_distance = radii[i] + radii[j]
+
+            if distance < allowed_distance and distance > 1e-9:  # collision
+                penetration = allowed_distance - distance
+                direction = difference / distance  # normalized
+                obstacles_true[i] += direction * (penetration / 2)
+                obstacles_true[j] -= direction * (penetration / 2)
+
+def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
+                              magnitude_sigma=0.05, turn_sigma=0.02):
+    """
+    Modify obstacle velocities by adding stochastic maneuvers.
+    """
+    new_speeds = obstacle_speeds.copy()
+
+    for i in range(len(new_speeds)):
+        vx, vy = new_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2)
+        
+        # 1) Small continuous jitter (small speed increase & speed decrease)
+        vx += np.random.normal(0, small_sigma)
+        vy += np.random.normal(0, small_sigma)
+        
+        # 2) Slight random drift in direction
+        theta = np.arctan2(vy, vx)
+        theta += np.random.normal(0, turn_sigma)
+        
+        # reconstruct velocity
+        vx = vmag * np.cos(theta)
+        vy = vmag * np.sin(theta)
+
+        # 3) Occasional large maneuver (%25 probability)
+        if np.random.rand() < maneuver_prob:
+            big_turn = np.random.uniform(-np.pi/2, np.pi/2)
+            theta += big_turn
+            vx = vmag * np.cos(theta)
+            vy = vmag * np.sin(theta)
+
+        new_speeds[i] = [vx, vy]
+
+    return new_speeds
+
+x_range = np.linspace(-30, 30, 50) #-5 ile 15 arasinda 50 esit parca olustur.
+y_range = np.linspace(-30, 30, 50)
 X, Y = np.meshgrid(x_range, y_range)
 Z = np.zeros_like(X)
 U = np.zeros_like(X)
@@ -150,6 +213,9 @@ for step in range(max_steps):
     # 1) move the real obstacles
     obstacles_true[:,0] += obstacle_speeds[:,0]*dt
     obstacles_true[:,1] += obstacle_speeds[:,1]*dt
+
+    # 1.1) resolve collisions (prevent overlap)
+    resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
 
     # 2) robot observes obstacles (noisy)
     obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)

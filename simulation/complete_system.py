@@ -638,11 +638,9 @@ def main():
     path_array = np.array(path_data)
     
     # Create meshgrid for potential field computation
-    # Determine bounds from path and obstacles
-    all_x = list(path_array[:, 0]) + list(obstacles_true[:, 0]) + [q[0], q_goal[0]]
-    all_y = list(path_array[:, 1]) + list(obstacles_true[:, 1]) + [q[1], q_goal[1]]
-    x_min, x_max = min(all_x) - 2, max(all_x) + 2
-    y_min, y_max = min(all_y) - 2, max(all_y) + 2
+    # Fixed bounds from -40 to 40 (matching template style)
+    x_min, x_max = -40, 40
+    y_min, y_max = -40, 40
     
     x_range = np.linspace(x_min, x_max, 50)
     y_range = np.linspace(y_min, y_max, 50)

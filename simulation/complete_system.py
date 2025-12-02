@@ -16,6 +16,7 @@ import numpy as np
 import math
 import random
 import time
+import itertools
 from typing import List, Optional, Tuple
 
 # Import potential field functions from existing code
@@ -74,6 +75,34 @@ class RRTNode:
 # Global Planner (TSP)
 # ---------------------------------------------------------------------------
 
+def _line_intersects_obstacle(p1: 'Point', p2: 'Point', obstacle: 'Obstacle',
+                              safety_margin: float = 0.2) -> bool:
+    """Check whether the segment p1->p2 intersects an obstacle (with margin)."""
+    dx = p2.x - p1.x
+    dy = p2.y - p1.y
+    length = math.hypot(dx, dy)
+    if length < 1e-6:
+        return obstacle.collides_with(p1, safety_margin)
+    dx /= length
+    dy /= length
+    to_obs_x = obstacle.position.x - p1.x
+    to_obs_y = obstacle.position.y - p1.y
+    proj = to_obs_x * dx + to_obs_y * dy
+    if proj < 0:
+        closest = p1
+    elif proj > length:
+        closest = p2
+    else:
+        closest = Point(p1.x + proj * dx, p1.y + proj * dy)
+    return obstacle.collides_with(closest, safety_margin)
+
+
+def _point_inside_obstacle(point: 'Point', obstacle: 'Obstacle',
+                           safety_margin: float = 0.0) -> bool:
+    """Helper to check if a point lies within an obstacle (with margin)."""
+    return obstacle.collides_with(point, safety_margin)
+
+
 class GlobalPlanner:
     """
     Global planner using TSP nearest-neighbor heuristic.
@@ -87,39 +116,73 @@ class GlobalPlanner:
         self.current_waypoint_order: List[Point] = []
     
     def optimize_waypoint_order(self, start: Point, waypoints: List[Point], 
-                                goal: Point) -> List[Point]:
+                                goal: Point,
+                                obstacles: Optional[List['Obstacle']] = None) -> List[Point]:
         """
-        Optimize waypoint order using nearest-neighbor TSP.
-        Greedy algorithm: always pick nearest unvisited waypoint.
-        takes in the start point, the waypoints to visit, and the goal point & returns the optimized waypoint order
+        Optimize waypoint order using brute-force TSP with obstacle awareness.
+
+        - Evaluates every permutation of the waypoint list (only feasible for
+          small waypoint counts, which we expect in this workflow).
+        - Discards any permutation whose straight-line segments intersect an
+          obstacle.
+        - Chooses the permutation with minimal total path length.
+        - Falls back to a greedy nearest-neighbor heuristic if no valid
+          permutation exists (for example when every straight line intersects).
         """
         if not waypoints:
             return [start, goal]
-        
+
+        obstacles = obstacles or []
+        best_order: Optional[List[Point]] = None
+        best_cost = float('inf')
+
+        for perm in itertools.permutations(waypoints):
+            sequence = [start] + list(perm) + [goal]
+            valid = True
+            cost = 0.0
+            for a, b in zip(sequence, sequence[1:]):
+                if obstacles and any(_line_intersects_obstacle(a, b, obs, 0.15) for obs in obstacles):
+                    valid = False
+                    break
+                cost += a.distance_to(b)
+            if valid and cost < best_cost:
+                best_cost = cost
+                best_order = sequence
+
+        if best_order:
+            return best_order
+
+        # Fall back to greedy nearest-neighbor if every permutation was invalid
+        return self._nearest_neighbor_order(start, waypoints, goal)
+
+    def _nearest_neighbor_order(self, start: Point, waypoints: List[Point], goal: Point) -> List[Point]:
+        """Greedy fallback when exhaustive search cannot produce a valid order."""
+        if not waypoints:
+            return [start, goal]
         optimized = [start]
         remaining = waypoints.copy()
         current = start
-        
         while remaining:
             nearest = min(remaining, key=lambda p: current.distance_to(p))
             optimized.append(nearest)
             remaining.remove(nearest)
             current = nearest
-        
         optimized.append(goal)
         return optimized
-    
+
     def plan_path(self, current_pos: Point, goal: Point, 
-                  waypoints: List[Point]) -> List[Point]:
+                  waypoints: List[Point],
+                  obstacles: Optional[List['Obstacle']] = None) -> List[Point]:
         """
-        Calculates a new waypoint order and stores it internally.
+        Calculates a new waypoint order (considering obstacles) and stores it.
         
-        This CALCULATES a new waypoint order and STORES it internally.
-        Use this when you want to create/update the plan.
-        
-        Returns: The optimized waypoint sequence
+        Args:
+            current_pos: Robot's current position (start of TSP)
+            goal: Final target
+            waypoints: Candidate waypoints to visit
+            obstacles: Optional obstacle list for collision-aware evaluation
         """
-        optimized = self.optimize_waypoint_order(current_pos, waypoints, goal)
+        optimized = self.optimize_waypoint_order(current_pos, waypoints, goal, obstacles)
         self.current_waypoint_order = optimized  # Store it
         return optimized
     
@@ -294,7 +357,7 @@ class CompleteSystem:
         self.rrt_path_index = 0
     
     def get_next_position(self, q: np.ndarray, q_goal: np.ndarray,
-                         waypoints: List[Point],
+                         waypoints: Optional[List[Point]],
                          obstacles_noisy: np.ndarray, obstacle_speeds: np.ndarray,
                          obstacles_rrt: List[Obstacle],
                          bounds: Optional[Tuple[float, float, float, float]] = None) -> Optional[np.ndarray]:
@@ -333,9 +396,9 @@ class CompleteSystem:
         # ============================================================
         
         if self.global_planner.should_replan(current_time):
-            # Recalculate waypoint order from current position
+            combined_waypoints = self._prepare_waypoints(current_point, goal_point, waypoints, obstacles_rrt)
             waypoint_order = self.global_planner.plan_path(
-                current_point, goal_point, waypoints
+                current_point, goal_point, combined_waypoints, obstacles_rrt
             )
             # Reset to start of new plan
             self.current_waypoint_index = 0
@@ -345,9 +408,10 @@ class CompleteSystem:
         # Get the current waypoint order (either from replanning or existing)
         waypoint_order = self.global_planner.get_current_waypoint_order()
         if not waypoint_order:
-            # First time - do initial planning
+            # First time - do initial planning with dynamic waypoints
+            combined_waypoints = self._prepare_waypoints(current_point, goal_point, waypoints, obstacles_rrt)
             waypoint_order = self.global_planner.plan_path(
-                current_point, goal_point, waypoints
+                current_point, goal_point, combined_waypoints, obstacles_rrt
             )
         
         # ============================================================
@@ -419,6 +483,75 @@ class CompleteSystem:
         
         return None
 
+    def _prepare_waypoints(self, current_point: Point, goal_point: Point,
+                           base_waypoints: Optional[List[Point]],
+                           obstacles: List[Obstacle]) -> List[Point]:
+        """
+         dynamically generated waypoints.
+
+        Dynamic waypoints are generated each time we plan, so the robot is not
+        relying on a static list. 
+        """
+        generated = self._generate_dynamic_waypoints(current_point, goal_point, obstacles)
+        return generated
+
+    def _generate_dynamic_waypoints(self, current: Point, goal: Point,
+                                    obstacles: List[Obstacle],
+                                    samples_along_path: int = 2) -> List[Point]:
+        """
+        Create dynamic waypoints based on the current robot position, goal,
+        and obstacle layout.
+
+        Strategy:
+        1. Create evenly spaced points along the straight line between current
+           position and goal. These change as the robot moves, so they're not static.
+        2. For any obstacle that intersects the straight line, create a detour
+           waypoint that skirts around the obstacle.
+        """
+        generated: List[Point] = []
+
+        # Evenly spaced points along the direct line (dynamic checkpoints)
+        dx = goal.x - current.x
+        dy = goal.y - current.y
+        for i in range(1, samples_along_path + 1):
+            t = i / (samples_along_path + 1)
+            waypoint = Point(current.x + dx * t, current.y + dy * t)
+            if not any(_point_inside_obstacle(waypoint, obs, 0.1) for obs in obstacles):
+                generated.append(waypoint)
+
+        # Detour points around blocking obstacles
+        for obs in obstacles:
+            if _line_intersects_obstacle(current, goal, obs, 0.1):
+                detour = self._compute_detour_point(current, goal, obs)
+                if detour and not any(_point_inside_obstacle(detour, other, 0.0) for other in obstacles):
+                    generated.append(detour)
+
+        return generated
+
+    def _compute_detour_point(self, start: Point, end: Point, obstacle: Obstacle,
+                              clearance: float = 0.6) -> Optional[Point]:
+        """Create a waypoint that skirts around an obstacle blocking the straight path."""
+        dx = end.x - start.x
+        dy = end.y - start.y
+        length = math.hypot(dx, dy)
+        if length < 1e-6:
+            return None
+        # Perpendicular unit vectors
+        perp_x = -dy / length
+        perp_y = dx / length
+        offset = obstacle.radius + clearance
+
+        candidate1 = Point(obstacle.position.x + perp_x * offset,
+                           obstacle.position.y + perp_y * offset)
+        candidate2 = Point(obstacle.position.x - perp_x * offset,
+                           obstacle.position.y - perp_y * offset)
+
+        # Choose candidate farther from the obstacle center (more clearance)
+        dist1 = candidate1.distance_to(obstacle.position)
+        dist2 = candidate2.distance_to(obstacle.position)
+        chosen = candidate1 if dist1 >= dist2 else candidate2
+        return chosen
+
 
 # ---------------------------------------------------------------------------
 # Example Usage
@@ -436,13 +569,9 @@ def main():
     q = np.array([0.0, 0.0])
     q_goal = np.array([10.0, 10.0])
     
-    # Define waypoints
-    waypoints = [
-        Point(2.0, 3.0),
-        Point(5.0, 5.0),
-        Point(8.0, 2.0),
-        Point(3.0, 8.0),
-    ]
+    # Waypoints are now dynamically generated by the system
+    # Pass None to use only dynamically generated waypoints
+    waypoints = None  # System will generate waypoints automatically based on obstacles and path
     
     # Convert obstacles for RRT
     obstacles_rrt = []
@@ -457,7 +586,7 @@ def main():
     tolerance = 0.1
     
     print("Running complete system (Global TSP + Local RRT + Potential Fields)...")
-    print(f"Waypoints to visit: {len(waypoints)}")
+    print("Waypoints are dynamically generated based on obstacles and path")
     
     for step in range(max_steps):
         # Update obstacles

@@ -15,19 +15,19 @@ from matplotlib.patches import Ellipse
 os.makedirs("figures", exist_ok=True)
 
 q_goal = np.array([10, 10]) # goal position
-q = np.array([0.0, 0.0]) # starting position of the robot
+q = np.array([-20.0, -20.0]) # starting position of the robot
 
 # obstacle coordinates 
-obstacles_true = np.array([[3, 3.5], [6,7], [9,9], [8,4], [5,5]])
+obstacles_true = np.array([[-5,-5], [-3,-3], [3, 3.5], [6,7], [9,9], [8,4], [5,5]])
 sigma = 0.1  # 10 cm uncertainity
 obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 
 # obstacle speeds
-obstacle_speeds = np.array([[0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
+obstacle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
 obstacle_speeds = obstacle_speeds * 5
 
 # APF parameters
-k_att, k_rep, d0, dt = 2.0, 10.0, 2.0, 0.01
+k_att, k_rep, d0, dt = 2.0, 40.0, 2.0, 0.01
 max_rep_force = 14.0
 path_data = [q.copy()]
 initial_obstacles = obstacles_true.copy()
@@ -39,7 +39,7 @@ alpha = 1.2   # major scaling (large)
 beta  = 0.3   # minor scaling (small)
 
 # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-sizes = np.array([1.0, 1.3, 0.8, 1.6, 1.1])
+sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1])
 # incorporate static size
 a_base = a0 * sizes
 b_base = b0 * sizes
@@ -87,7 +87,7 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
         d0_i = 1.2 * max(a, b)
 
         if dE < d0_i:
-            F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
+            F_mag = k_rep * (1/dE - 1/d0_i) * (1/dE**2)
             # yön vektörü (normalize edilmiş fark)
             grad_Dq = Q @ (q - obs) / (dE + 1e-12)
             # toplam kuvvet
@@ -123,7 +123,7 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
 
         if dE < 1e-6:  # avoid division by zero
             dE = 1e-6
-        U_rep = 0.5 * k_rep * (1/dE - 1/d0)**2 if dE < d0_i else 0
+        U_rep = 0.5 * k_rep * (1/dE - 1/d0_i)**2 if dE < d0_i else 0
         U_rep_total += U_rep
     return U_att + U_rep_total
 
@@ -135,21 +135,87 @@ def total_force(q, q_goal, obstacles_noisy, obstacle_speeds):
     F_rep = repulsive_force(q, obstacles_noisy, obstacle_speeds)
     return F_att + F_rep
 
-x_range = np.linspace(-25, 25, 50) #-5 ile 15 arasinda 50 esit parca olustur.
-y_range = np.linspace(-25, 25, 50)
+def resolve_obstacle_collisions(obstacles_true, obstacle_speeds):
+    N = len(obstacles_true)
+
+    # --- compute dynamic radii ---
+    radii = np.zeros(N)
+    for i in range(N):
+        vx, vy = obstacle_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2)
+
+        a_i = a_base[i] + alpha * vmag
+        b_i = b_base[i] + beta  * vmag
+
+        # realistic effective radius = max(axis lengths)
+        radii[i] = max(a_i, b_i)
+
+    # --- pairwise collision check ---
+    for i in range(N):
+        for j in range(i+1, N):
+
+            difference = obstacles_true[i] - obstacles_true[j]
+            distance = np.linalg.norm(difference)
+            allowed_distance = radii[i] + radii[j]
+
+            if distance < allowed_distance and distance > 1e-9:  # collision
+                penetration = allowed_distance - distance
+                direction = difference / distance  # normalized
+                obstacles_true[i] += direction * (penetration / 2)
+                obstacles_true[j] -= direction * (penetration / 2)
+
+def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
+                              magnitude_sigma=0.05, turn_sigma=0.02):
+    """
+    Modify obstacle velocities by adding stochastic maneuvers.
+    """
+    new_speeds = obstacle_speeds.copy()
+
+    for i in range(len(new_speeds)):
+        vx, vy = new_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2)
+        
+        # 1) Small continuous jitter (small speed increase & speed decrease)
+        vx += np.random.normal(0, small_sigma)
+        vy += np.random.normal(0, small_sigma)
+        
+        # 2) Slight random drift in direction
+        theta = np.arctan2(vy, vx)
+        theta += np.random.normal(0, turn_sigma)
+        
+        # reconstruct velocity
+        vx = vmag * np.cos(theta)
+        vy = vmag * np.sin(theta)
+
+        # 3) Occasional large maneuver (%25 probability)
+        if np.random.rand() < maneuver_prob:
+            big_turn = np.random.uniform(-np.pi/2, np.pi/2)
+            theta += big_turn
+            vx = vmag * np.cos(theta)
+            vy = vmag * np.sin(theta)
+
+        new_speeds[i] = [vx, vy]
+
+    return new_speeds
+
+x_range = np.linspace(-30, 30, 50) #-5 ile 15 arasinda 50 esit parca olustur.
+y_range = np.linspace(-30, 30, 50)
 X, Y = np.meshgrid(x_range, y_range)
 Z = np.zeros_like(X)
 U = np.zeros_like(X)
 V = np.zeros_like(Y)
 
 # simulate the path
-max_steps = 1000
+max_steps = 2000
 tolerance = 0.1
 
 for step in range(max_steps):
     # 1) move the real obstacles
     obstacles_true[:,0] += obstacle_speeds[:,0]*dt
     obstacles_true[:,1] += obstacle_speeds[:,1]*dt
+
+    # 1.1) resolve collisions (prevent overlap)
+    resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
 
     # 2) robot observes obstacles (noisy)
     obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
@@ -190,26 +256,50 @@ for i in range(X.shape[0]):
 # ==========================================================
 
 # ---- 1️⃣ 3D Potential Surface ----
-fig = plt.figure()
+fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
-ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.9)
+
+# Surface + colorbar
+surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7)
+cbar = fig.colorbar(surf, ax=ax, shrink=0.6, pad=0.1)
+cbar.set_label("Potential Energy", fontsize=14)
+cbar.ax.tick_params(labelsize=12)
+
+# Path with correct potential computation
+ax.plot(path[:,0], path[:,1],
+        [potential(p, q_goal, obstacles_noisy, obstacle_speeds) for p in path],
+        color='red', linewidth=2, label='Path')
+
+# Start position (⭐)
+ax.scatter(path[0,0], path[0,1],
+           potential(path[0], q_goal, obstacles_noisy, obstacle_speeds),
+           color='cyan', marker='x', s=120, linewidths=3, label='Start')
 
 # REAL OBSTACLES (truth)
 ax.scatter(obstacles_true[:,0], obstacles_true[:,1],
-            np.max(Z)*0.8, color='black', s=50, label='True Obstacle Centers')
+            np.max(Z)*0.8, color='black', s=80, label='True Obstacle Centers')
 
-# NOISY (sensor-detected) OBSTACLES
+# NOISY OBSTACLES (sensor-detected) 
 ax.scatter(obstacles_noisy[:,0], obstacles_noisy[:,1],
-            np.max(Z)*0.8, color='red', s=50, label='Noisy Detected Centers')
+            np.max(Z)*0.8, color='red', s=80, label='Noisy Detected Centers')
 
-ax.scatter(q_goal[0], q_goal[1],
-            np.min(Z), color='green', s=50, label='Goal')
+# Goal position
+ax.scatter(q_goal[0], q_goal[1], np.min(Z),
+           color='orange', s=80, marker='x', linewidths=3, label='Goal')
 
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_zlabel('Potential Energy')
-ax.set_title('3D Potential Field Surface')
-ax.legend()
+# FONT SIZE SETTINGS
+ax.set_xlabel('X', fontsize=16)
+ax.set_ylabel('Y', fontsize=16)
+ax.set_zlabel('Potential Energy', fontsize=16)
+
+ax.set_title('3D Potential Field Surface', fontsize=18)
+
+# Tick label size
+ax.tick_params(axis='both', labelsize=12)
+
+# Legend font size
+ax.legend(fontsize=14)
+
 plt.savefig("figures/fig_3d_potentialsurface.png", dpi=300, bbox_inches='tight')
 plt.show()
 
@@ -218,19 +308,27 @@ plt.show()
 fig, axs = plt.subplots(1, 2, figsize=(12, 6))
 contour = axs[0].contourf(X, Y, Z, levels=100, cmap='viridis')
 
+# --- Start Position ---
+start_x, start_y = path[0]
+axs[0].scatter(start_x, start_y, marker='x', s=120, color='cyan', linewidths=3, label='Start')
+
 axs[0].plot(path[:,0], path[:,1], 'w-', label='Path')
 
-# true vs noisy
+# true vs noisy obstacles
 axs[0].plot(obstacles_true[:,0], obstacles_true[:,1], 'ko', label='True Centers')
 axs[0].plot(obstacles_noisy[:,0], obstacles_noisy[:,1], 'ro', label='Noisy Centers')
 
-axs[0].plot(q_goal[0], q_goal[1], 'go', label='Goal')
+# --- Goal Position ---
+axs[0].scatter(q_goal[0], q_goal[1],
+               marker='x', s=120, color='orange', linewidths=3, label='Goal')
 
 # --- draw ellipses for TRUE obstacles
 for i, obs in enumerate(obstacles_true):
     vx, vy = obstacle_speeds[i]
     vmag = np.sqrt(vx**2 + vy**2)
     theta = np.degrees(np.arctan2(vy, vx + 1e-12))
+
+    # 1) Physical ellipse (dE = 1 boundary)
     a = a_base[i] + alpha * vmag
     b = b_base[i] + beta  * vmag
     ellipse = Ellipse(
@@ -258,32 +356,3 @@ plt.tight_layout()
 plt.savefig("figures/fig_contour_force.png", dpi=300, bbox_inches='tight')
 plt.show()
 
-# ---- 3️⃣ 3D Path over Potential Surface ----
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7)
-
-# Path with correct potential computation
-ax.plot(path[:,0], path[:,1],
-        [potential(p, q_goal, obstacles_noisy, obstacle_speeds) for p in path],
-        color='red', linewidth=2, label='Path')
-
-ax.scatter(q_goal[0], q_goal[1], 0, color='green', s=50, label='Goal')
-
-# true obstacles 
-ax.scatter(obstacles_true[:,0], obstacles_true[:,1],
-           np.zeros(len(obstacles_true)),  
-           color='black', s=50, label='True Centers')
-
-# noisy centers
-ax.scatter(obstacles_noisy[:,0], obstacles_noisy[:,1],
-           np.zeros(len(obstacles_noisy)),
-           color='red', s=50, label='Noisy Centers')
-
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_zlabel('Potential')
-ax.set_title('3D Potential Field with Path')
-ax.legend()
-plt.savefig("figures/fig_3d_path.png", dpi=300, bbox_inches='tight')
-plt.show()

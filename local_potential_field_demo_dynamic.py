@@ -197,6 +197,34 @@ def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
 
     return new_speeds
 
+def is_collision_check(q, obstacles_noisy, obstacle_speeds):
+    collided_indices = []
+    counter = 0
+
+    for i, obs in enumerate(obstacles_noisy):
+        vx, vy = obstacle_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2) 
+        theta = np.arctan2(vy, vx + 1e-12)
+               
+        a = a_base[i] + alpha * vmag 
+        b = b_base[i] + beta  * vmag 
+        
+        c, s = np.cos(theta), np.sin(theta)
+        R = np.array([[c, s],
+                  [-s,  c]])
+        Q0 = np.diag([1/a**2, 1/b**2])
+        Q  = R @ Q0 @ R.T
+
+        # elliptical distance
+        dE = np.sqrt(float((q - obs).T @ Q @ (q - obs)) + 1e-12)
+        
+        # COLLISION condition: robot is inside the ellipse
+        if dE < 1.0:
+            counter += 1
+            collided_indices.append(i)
+    
+    return counter, collided_indices
+
 x_range = np.linspace(-40, 40, 50) #-5 ile 15 arasinda 50 esit parca olustur.
 y_range = np.linspace(-40, 40, 50)
 X, Y = np.meshgrid(x_range, y_range)
@@ -207,7 +235,6 @@ V = np.zeros_like(Y)
 # simulate the path
 max_steps = 2000
 tolerance = 0.1
-
 
 for step in range(max_steps):
     
@@ -229,6 +256,11 @@ for step in range(max_steps):
 
     # 4) robot moves
     q = q + F * dt
+
+    #. check the collision
+    count, hits = is_collision_check(q, obstacles_noisy, obstacle_speeds)
+    if count > 0:
+        print("Collision detected with obstacle:", hits)
 
     # 5) path
     path_data.append(q.copy())

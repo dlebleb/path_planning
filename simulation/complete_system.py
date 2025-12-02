@@ -18,13 +18,18 @@ import random
 import time
 import itertools
 from typing import List, Optional, Tuple
+from datetime import datetime
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
+from mpl_toolkits.mplot3d import Axes3D
 
 # Import potential field functions from existing code
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from local_potential_field_demo_dynamic import (
-    total_force, dt  # total_force calculates attractive + repulsive forces, dt is time step
+    total_force, potential, dt,  # total_force and potential for visualization
+    a_base, b_base, alpha, beta  # For elliptical obstacle visualization
 )
 
 
@@ -588,10 +593,13 @@ def main():
     print("Running complete system (Global TSP + Local RRT + Potential Fields)...")
     print("Waypoints are dynamically generated based on obstacles and path")
     
+    # Make obstacles static (no movement)
+    obstacle_speeds = np.zeros_like(obstacle_speeds)
+    
     for step in range(max_steps):
-        # Update obstacles
-        obstacles_true[:, 0] += obstacle_speeds[:, 0] * dt
-        obstacles_true[:, 1] += obstacle_speeds[:, 1] * dt
+        # Obstacles are static - no position updates
+        # obstacles_true[:, 0] += obstacle_speeds[:, 0] * dt
+        # obstacles_true[:, 1] += obstacle_speeds[:, 1] * dt
         
         # Robot observes obstacles (noisy)
         obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
@@ -619,6 +627,169 @@ def main():
             break
     
     print(f"Final path has {len(path_data)} points")
+    
+    # ============================================================
+    # Visualization: Generate figures based on actual run
+    # Uses same method/style as local_potential_field_demo_dynamic.py
+    # ============================================================
+    print("\nGenerating visualization figures...")
+    
+    # Convert path data to numpy array
+    path_array = np.array(path_data)
+    
+    # Create meshgrid for potential field computation
+    # Determine bounds from path and obstacles
+    all_x = list(path_array[:, 0]) + list(obstacles_true[:, 0]) + [q[0], q_goal[0]]
+    all_y = list(path_array[:, 1]) + list(obstacles_true[:, 1]) + [q[1], q_goal[1]]
+    x_min, x_max = min(all_x) - 2, max(all_x) + 2
+    y_min, y_max = min(all_y) - 2, max(all_y) + 2
+    
+    x_range = np.linspace(x_min, x_max, 50)
+    y_range = np.linspace(y_min, y_max, 50)
+    X, Y = np.meshgrid(x_range, y_range)
+    Z = np.zeros_like(X)
+    U = np.zeros_like(X)
+    V = np.zeros_like(Y)
+    
+    # Compute potential and force field using final obstacle positions
+    # Use the last noisy observation from the simulation
+    final_obstacles_noisy = obstacles_noisy
+    
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            pos = np.array([X[i, j], Y[i, j]])
+            # Compute potential
+            Z[i, j] = potential(pos, q_goal, final_obstacles_noisy, obstacle_speeds)
+            # Compute force field
+            F = total_force(pos, q_goal, final_obstacles_noisy, obstacle_speeds)
+            U[i, j], V[i, j] = F[0], F[1]
+    
+    # Create generated_figures directory for new figures (Dec 1st figures stay in figures/)
+    os.makedirs("generated_figures", exist_ok=True)
+    
+    # Generate unique filenames with timestamp (saved in generated_figures folder)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fig_3d_name = f"generated_figures/fig_3d_potentialsurface_{timestamp}.png"
+    fig_contour_name = f"generated_figures/fig_contour_force_{timestamp}.png"
+    
+    # ---- 1️⃣ 3D Potential Surface (same style as template) ----
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Surface + colorbar
+    surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7)
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.6, pad=0.1)
+    cbar.set_label("Potential Energy", fontsize=14)
+    cbar.ax.tick_params(labelsize=12)
+    
+    # Path with correct potential computation
+    path_potentials = [potential(p, q_goal, final_obstacles_noisy, obstacle_speeds) for p in path_array]
+    ax.plot(path_array[:, 0], path_array[:, 1], path_potentials,
+            color='red', linewidth=2, label='Path')
+    
+    # Start position
+    ax.scatter(path_array[0, 0], path_array[0, 1], path_potentials[0],
+               color='cyan', marker='x', s=120, linewidths=3, label='Start')
+    
+    # REAL OBSTACLES (truth)
+    ax.scatter(obstacles_true[:, 0], obstacles_true[:, 1],
+               np.max(Z) * 0.8, color='black', s=80, label='True Obstacle Centers')
+    
+    # NOISY OBSTACLES (sensor-detected)
+    ax.scatter(final_obstacles_noisy[:, 0], final_obstacles_noisy[:, 1],
+               np.max(Z) * 0.8, color='red', s=80, label='Noisy Detected Centers')
+    
+    # Goal position
+    goal_potential = potential(q_goal, q_goal, final_obstacles_noisy, obstacle_speeds)
+    ax.scatter(q_goal[0], q_goal[1], goal_potential,
+               color='orange', s=80, marker='x', linewidths=3, label='Goal')
+    
+    # Labels and title
+    ax.set_xlabel('X', fontsize=16)
+    ax.set_ylabel('Y', fontsize=16)
+    ax.set_zlabel('Potential Energy', fontsize=16)
+    ax.set_title('3D Potential Field Surface', fontsize=18)
+    ax.tick_params(axis='both', labelsize=12)
+    ax.legend(fontsize=14)
+    
+    plt.savefig(fig_3d_name, dpi=300, bbox_inches='tight')
+    print(f"Saved: {fig_3d_name}")
+    plt.show()
+    
+    # ---- 2️⃣ 2D Contour + Force Field (same style as template) ----
+    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+    
+    # Left plot: Contour map
+    contour = axs[0].contourf(X, Y, Z, levels=100, cmap='viridis')
+    
+    # Start position
+    start_x, start_y = path_array[0]
+    axs[0].scatter(start_x, start_y, marker='x', s=120, color='cyan', 
+                   linewidths=3, label='Start')
+    
+    # Path
+    axs[0].plot(path_array[:, 0], path_array[:, 1], 'w-', linewidth=2, label='Path')
+    
+    # True vs noisy obstacles
+    axs[0].plot(obstacles_true[:, 0], obstacles_true[:, 1], 'ko', 
+               markersize=8, label='True Centers')
+    axs[0].plot(final_obstacles_noisy[:, 0], final_obstacles_noisy[:, 1], 'ro', 
+               markersize=8, label='Noisy Centers')
+    
+    # Goal position
+    axs[0].scatter(q_goal[0], q_goal[1], marker='x', s=120, color='orange', 
+                  linewidths=3, label='Goal')
+    
+    # Draw ellipses for obstacles (same method as template)
+    for i, obs in enumerate(obstacles_true):
+        if i < len(obstacle_speeds):
+            vx, vy = obstacle_speeds[i]
+        else:
+            vx, vy = 0.0, 0.0
+        vmag = np.sqrt(vx**2 + vy**2)
+        theta = np.degrees(np.arctan2(vy, vx + 1e-12))
+        
+        # Physical ellipse
+        if i < len(a_base) and i < len(b_base):
+            a = a_base[i] + alpha * vmag
+            b = b_base[i] + beta * vmag
+        else:
+            a, b = 1.0, 1.0  # Default size
+        
+        ellipse = Ellipse(
+            xy=(obs[0], obs[1]),
+            width=2*a, height=2*b,
+            angle=theta,
+            edgecolor='white', facecolor='none',
+            linestyle='--', linewidth=1.5
+        )
+        axs[0].add_patch(ellipse)
+    
+    axs[0].set_title("Potential Energy Map with Elliptical Obstacles", fontsize=14)
+    axs[0].legend(fontsize=10)
+    axs[0].set_xlabel("X", fontsize=12)
+    axs[0].set_ylabel("Y", fontsize=12)
+    plt.colorbar(contour, ax=axs[0], label='Potential Energy')
+    
+    # Right plot: Force field
+    axs[1].quiver(X, Y, U, V, color='black', alpha=0.6)
+    axs[1].plot(path_array[:, 0], path_array[:, 1], 'r-', linewidth=2, label='Path')
+    axs[1].scatter(start_x, start_y, marker='x', s=120, color='cyan', 
+                  linewidths=3, label='Start')
+    axs[1].scatter(q_goal[0], q_goal[1], marker='x', s=120, color='orange', 
+                  linewidths=3, label='Goal')
+    axs[1].set_title("Force Field (Gradient of Potential)", fontsize=14)
+    axs[1].set_xlabel("X", fontsize=12)
+    axs[1].set_ylabel("Y", fontsize=12)
+    axs[1].legend(fontsize=10)
+    axs[1].set_aspect('equal')
+    
+    plt.tight_layout()
+    plt.savefig(fig_contour_name, dpi=300, bbox_inches='tight')
+    print(f"Saved: {fig_contour_name}")
+    plt.show()
+    
+    print("\nVisualization complete!")
 
 
 if __name__ == "__main__":

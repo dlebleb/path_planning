@@ -1,18 +1,21 @@
-# Robot Path Planning - Work in Progress
+# Robot Path Planning System
 
-A Python-based global path planning system for robot navigation using a Traveling Salesman Problem (TSP) approach for waypoint optimization and A* algorithm for obstacle avoidance. Designed for future integration with Isaac Sim.
+A Python-based integrated path planning system for robot navigation combining global planning (TSP) with local planning (RRT + Potential Fields) for obstacle avoidance.
 
-## Current Status
+## Overview
 
-**Work in Progress** - Basic structure and core components implemented.
+The system uses a two-level planning approach:
+- **Global Planner (TSP)**: Optimizes waypoint order every 5 seconds to minimize travel distance
+- **Local Planner (RRT + Potential Fields)**: Handles real-time navigation and collision-free pathfinding between waypoints
 
-## Features (Planned)
+## Features
 
-- Global path planning with A* algorithm
-- TSP-based waypoint optimization  
-- Dynamic obstacle avoidance (2 moving obstacles)
-- Real-time path replanning
-- Isaac Sim integration
+- TSP-based waypoint optimization with obstacle awareness
+- RRT path planning for collision-free navigation
+- Potential field integration for dynamic obstacle avoidance
+- Dynamic waypoint generation (no hardcoded waypoints)
+- Periodic replanning every 5 seconds
+- Visualization of potential fields and robot paths
 
 ## Installation
 
@@ -20,44 +23,49 @@ A Python-based global path planning system for robot navigation using a Travelin
 pip install -r requirements.txt
 ```
 
-## Basic Usage
+## Usage
 
 ```python
-from path_planner import PathPlanner, Obstacle, Point
-from simulation import Simulation
+from complete_system import CompleteSystem
+from local_potential_field_demo_dynamic import obstacles_true, obstacle_speeds, sigma
+import numpy as np
 
-# Create simulation
-sim = Simulation()
+# Initialize system
+system = CompleteSystem(replan_interval=5.0, rrt_step_size=0.3, rrt_max_iter=300)
 
-# Setup scenario
-start = Point(0.0, 0.0)
-goal = Point(4.0, 4.0)
+# Set start and goal positions
+q = np.array([0.0, 0.0])
+q_goal = np.array([10.0, 10.0])
 
-obstacles = [
-    Obstacle(Point(1.5, 1.5), 0.4, Point(0.3, 0.2), id=1),
-    Obstacle(Point(2.5, 2.5), 0.3, Point(-0.2, 0.3), id=2)
-]
-
-sim.setup_scenario(start, goal, obstacles)
-
-# Plan path
-path = sim.planner.plan_global_path(start, goal)
+# Run simulation
+# (See complete_system.py main() for full example)
 ```
 
 ## File Structure
 
 ```
 simulation/
-├── path_planner.py      # Core path planning algorithms (A*, TSP)
-├── simulation.py        # Basic simulation class
-├── requirements.txt     # Python dependencies
-└── README.md           # This file
+├── complete_system.py          # Main integrated system (TSP + RRT + Potential Fields)
+├── global_planner_simple.py    # Standalone global planner
+├── rrt_planner.py              # Standalone RRT planner
+├── rrt_potential_integrated.py # RRT + Potential Fields integration
+├── figures/                    # Template visualization figures
+├── generated_figures/          # Generated figures from each run
+├── requirements.txt            # Python dependencies
+└── README.md                   # This file
 ```
 
-## Next Steps
+## System Components
 
-- Complete path planning implementation
-- Add robot movement simulation
-- Implement dynamic obstacle handling
-- Integrate with Isaac Sim
+- **GlobalPlanner**: TSP-based waypoint optimization with obstacle-aware path checking
+- **RRTPlanner**: Rapidly-exploring Random Tree for collision-free path generation
+- **CompleteSystem**: Orchestrates global and local planning
 
+## Visualization
+
+The system generates visualization figures showing:
+- 3D potential field surface
+- 2D contour map with force field
+- Robot path and obstacle positions
+
+Figures are saved to `generated_figures/` with timestamps for each run.

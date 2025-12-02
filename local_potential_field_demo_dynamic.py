@@ -175,11 +175,10 @@ def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
         vx, vy = new_speeds[i]
         vmag = np.sqrt(vx**2 + vy**2)
         
-        # 1) Small continuous jitter (small speed increase & speed decrease)
-        vx += np.random.normal(0, small_sigma)
-        vy += np.random.normal(0, small_sigma)
+        # 1) Small continuous jitter (small speed increase & decrease, 5%)
+        vmag *= np.random.normal(1, magnitude_sigma)
         
-        # 2) Slight random drift in direction
+        # 2) Slight random drift in direction(2%)
         theta = np.arctan2(vy, vx)
         theta += np.random.normal(0, turn_sigma)
         
@@ -198,8 +197,8 @@ def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
 
     return new_speeds
 
-x_range = np.linspace(-30, 30, 50) #-5 ile 15 arasinda 50 esit parca olustur.
-y_range = np.linspace(-30, 30, 50)
+x_range = np.linspace(-40, 40, 50) #-5 ile 15 arasinda 50 esit parca olustur.
+y_range = np.linspace(-40, 40, 50)
 X, Y = np.meshgrid(x_range, y_range)
 Z = np.zeros_like(X)
 U = np.zeros_like(X)
@@ -209,12 +208,17 @@ V = np.zeros_like(Y)
 max_steps = 2000
 tolerance = 0.1
 
+
 for step in range(max_steps):
+    
+    # 0) random maneuver (new speeds)
+    obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
+
     # 1) move the real obstacles
     obstacles_true[:,0] += obstacle_speeds[:,0]*dt
     obstacles_true[:,1] += obstacle_speeds[:,1]*dt
 
-    # 1.1) resolve collisions (prevent overlap)
+    # 1.1) resolve collisions between obstacles (prevent overlap)
     resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
 
     # 2) robot observes obstacles (noisy)
@@ -343,7 +347,6 @@ for i, obs in enumerate(obstacles_true):
 axs[0].set_title("Potential Energy Map with Elliptical Obstacles")
 axs[0].legend()
 plt.colorbar(contour, ax=axs[0])
-
 
 # FORCE FIELD PLOT
 axs[1].quiver(X, Y, U, V, color='black', alpha=0.6)

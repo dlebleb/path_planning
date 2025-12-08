@@ -40,6 +40,7 @@ class Point:
         return (self.x, self.y)
 
 
+<<<<<<< HEAD
 class Obstacle:
     """
     Circular obstacle representation for collision checking.
@@ -72,6 +73,8 @@ class Obstacle:
         return distance < (self.radius + safety_margin)
 
 
+=======
+>>>>>>> 6c55c7a4f4e698ec083b455e4f28d5a891c5e843
 class GlobalPlanner:
 
     

@@ -20,7 +20,7 @@ Designed to work with:
 import math
 import random
 from typing import List, Optional
-from path_planner import Point, Obstacle
+from global_planner_simple import Point, Obstacle
 
 
 class RRTNode:
@@ -291,13 +291,10 @@ class RRTPlanner:
 
 def main():
     """Simple example"""
-    from path_planner import DEFAULT_OBSTACLES
-    
     rrt = RRTPlanner(step_size=0.3, max_iterations=2000)
     
     start = Point(0.0, 0.0)
     goal = Point(4.0, 4.0)
-    obstacles = DEFAULT_OBSTACLES
     bounds = (-1.0, 5.0, -1.0, 5.0)
     
     print("Planning RRT path...")

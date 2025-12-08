@@ -197,165 +197,167 @@ def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
 
     return new_speeds
 
-x_range = np.linspace(-40, 40, 50) #-5 ile 15 arasinda 50 esit parca olustur.
-y_range = np.linspace(-40, 40, 50)
-X, Y = np.meshgrid(x_range, y_range)
-Z = np.zeros_like(X)
-U = np.zeros_like(X)
-V = np.zeros_like(Y)
-
-# simulate the path
-max_steps = 2000
-tolerance = 0.1
-
-
-for step in range(max_steps):
+if __name__ == "__main__":
+    # Only run simulation and plotting when script is executed directly
+    # (not when imported by other scripts)
     
-    # 0) random maneuver (new speeds)
-    obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
+    x_range = np.linspace(-40, 40, 50) #-5 ile 15 arasinda 50 esit parca olustur.
+    y_range = np.linspace(-40, 40, 50)
+    X, Y = np.meshgrid(x_range, y_range)
+    Z = np.zeros_like(X)
+    U = np.zeros_like(X)
+    V = np.zeros_like(Y)
 
-    # 1) move the real obstacles
-    obstacles_true[:,0] += obstacle_speeds[:,0]*dt
-    obstacles_true[:,1] += obstacle_speeds[:,1]*dt
+    # simulate the path
+    max_steps = 2000
+    tolerance = 0.1
 
-    # 1.1) resolve collisions between obstacles (prevent overlap)
-    resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
+    for step in range(max_steps):
+        # 0) random maneuver (new speeds)
+        obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
 
-    # 2) robot observes obstacles (noisy)
-    obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
+        # 1) move the real obstacles
+        obstacles_true[:,0] += obstacle_speeds[:,0]*dt
+        obstacles_true[:,1] += obstacle_speeds[:,1]*dt
 
-    # 3) force calculation
-    F = total_force(q, q_goal, obstacles_noisy, obstacle_speeds)
+        # 1.1) resolve collisions between obstacles (prevent overlap)
+        resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
 
-    # 4) robot moves
-    q = q + F * dt
+        # 2) robot observes obstacles (noisy)
+        obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 
-    # 5) path
-    path_data.append(q.copy())
+        # 3) force calculation
+        F = total_force(q, q_goal, obstacles_noisy, obstacle_speeds)
 
-    # stop condition: close enough to goal
-    if np.linalg.norm(q - q_goal) < tolerance:
-        print(f"Reached goal in {step} steps!")
-        break
+        # 4) robot moves
+        q = q + F * dt
 
-path = np.array(path_data)
+        # 5) path
+        path_data.append(q.copy())
 
-# ==========================================================
-# Compute field AFTER full motion simulation
-# ==========================================================
+        # stop condition: close enough to goal
+        if np.linalg.norm(q - q_goal) < tolerance:
+            print(f"Reached goal in {step} steps!")
+            break
 
-for i in range(X.shape[0]):
-    for j in range(X.shape[1]):
-        pos = np.array([X[i,j], Y[i,j]])
-        
-        # potential uses noisy obstacles
-        Z[i,j] = potential(pos, q_goal, obstacles_noisy, obstacle_speeds)
+    path = np.array(path_data)
 
-        # force field also uses noisy obstacles
-        F = total_force(pos, q_goal, obstacles_noisy, obstacle_speeds)
-        U[i,j], V[i,j] = F[0], F[1]
+    # ==========================================================
+    # Compute field AFTER full motion simulation
+    # ==========================================================
 
-# ==========================================================
-#                     PLOTTING SECTION
-# ==========================================================
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            pos = np.array([X[i,j], Y[i,j]])
+            
+            # potential uses noisy obstacles
+            Z[i,j] = potential(pos, q_goal, obstacles_noisy, obstacle_speeds)
 
-# ---- 1️⃣ 3D Potential Surface ----
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
+            # force field also uses noisy obstacles
+            F = total_force(pos, q_goal, obstacles_noisy, obstacle_speeds)
+            U[i,j], V[i,j] = F[0], F[1]
 
-# Surface + colorbar
-surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7)
-cbar = fig.colorbar(surf, ax=ax, shrink=0.6, pad=0.1)
-cbar.set_label("Potential Energy", fontsize=14)
-cbar.ax.tick_params(labelsize=12)
+    # ==========================================================
+    #                     PLOTTING SECTION
+    # ==========================================================
 
-# Path with correct potential computation
-ax.plot(path[:,0], path[:,1],
-        [potential(p, q_goal, obstacles_noisy, obstacle_speeds) for p in path],
-        color='red', linewidth=2, label='Path')
+    # ---- 1️⃣ 3D Potential Surface ----
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
 
-# Start position (⭐)
-ax.scatter(path[0,0], path[0,1],
-           potential(path[0], q_goal, obstacles_noisy, obstacle_speeds),
-           color='cyan', marker='x', s=120, linewidths=3, label='Start')
+    # Surface + colorbar
+    surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7)
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.6, pad=0.1)
+    cbar.set_label("Potential Energy", fontsize=14)
+    cbar.ax.tick_params(labelsize=12)
 
-# REAL OBSTACLES (truth)
-ax.scatter(obstacles_true[:,0], obstacles_true[:,1],
-            np.max(Z)*0.8, color='black', s=80, label='True Obstacle Centers')
+    # Path with correct potential computation
+    ax.plot(path[:,0], path[:,1],
+            [potential(p, q_goal, obstacles_noisy, obstacle_speeds) for p in path],
+            color='red', linewidth=2, label='Path')
 
-# NOISY OBSTACLES (sensor-detected) 
-ax.scatter(obstacles_noisy[:,0], obstacles_noisy[:,1],
-            np.max(Z)*0.8, color='red', s=80, label='Noisy Detected Centers')
+    # Start position (⭐)
+    ax.scatter(path[0,0], path[0,1],
+               potential(path[0], q_goal, obstacles_noisy, obstacle_speeds),
+               color='cyan', marker='x', s=120, linewidths=3, label='Start')
 
-# Goal position
-ax.scatter(q_goal[0], q_goal[1], np.min(Z),
-           color='orange', s=80, marker='x', linewidths=3, label='Goal')
+    # REAL OBSTACLES (truth)
+    ax.scatter(obstacles_true[:,0], obstacles_true[:,1],
+                np.max(Z)*0.8, color='black', s=80, label='True Obstacle Centers')
 
-# FONT SIZE SETTINGS
-ax.set_xlabel('X', fontsize=16)
-ax.set_ylabel('Y', fontsize=16)
-ax.set_zlabel('Potential Energy', fontsize=16)
+    # NOISY OBSTACLES (sensor-detected) 
+    ax.scatter(obstacles_noisy[:,0], obstacles_noisy[:,1],
+                np.max(Z)*0.8, color='red', s=80, label='Noisy Detected Centers')
 
-ax.set_title('3D Potential Field Surface', fontsize=18)
+    # Goal position
+    ax.scatter(q_goal[0], q_goal[1], np.min(Z),
+               color='orange', s=80, marker='x', linewidths=3, label='Goal')
 
-# Tick label size
-ax.tick_params(axis='both', labelsize=12)
+    # FONT SIZE SETTINGS
+    ax.set_xlabel('X', fontsize=16)
+    ax.set_ylabel('Y', fontsize=16)
+    ax.set_zlabel('Potential Energy', fontsize=16)
 
-# Legend font size
-ax.legend(fontsize=14)
+    ax.set_title('3D Potential Field Surface', fontsize=18)
 
-plt.savefig("figures/fig_3d_potentialsurface.png", dpi=300, bbox_inches='tight')
-plt.show()
+    # Tick label size
+    ax.tick_params(axis='both', labelsize=12)
+
+    # Legend font size
+    ax.legend(fontsize=14)
+
+    plt.savefig("figures/fig_3d_potentialsurface.png", dpi=300, bbox_inches='tight')
+    plt.show()
 
 
-# ---- 2️⃣ 2D Contour + Force Field ----
-fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-contour = axs[0].contourf(X, Y, Z, levels=100, cmap='viridis')
+    # ---- 2️⃣ 2D Contour + Force Field ----
+    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+    contour = axs[0].contourf(X, Y, Z, levels=100, cmap='viridis')
 
-# --- Start Position ---
-start_x, start_y = path[0]
-axs[0].scatter(start_x, start_y, marker='x', s=120, color='cyan', linewidths=3, label='Start')
+    # --- Start Position ---
+    start_x, start_y = path[0]
+    axs[0].scatter(start_x, start_y, marker='x', s=120, color='cyan', linewidths=3, label='Start')
 
-axs[0].plot(path[:,0], path[:,1], 'w-', label='Path')
+    axs[0].plot(path[:,0], path[:,1], 'w-', label='Path')
 
-# true vs noisy obstacles
-axs[0].plot(obstacles_true[:,0], obstacles_true[:,1], 'ko', label='True Centers')
-axs[0].plot(obstacles_noisy[:,0], obstacles_noisy[:,1], 'ro', label='Noisy Centers')
+    # true vs noisy obstacles
+    axs[0].plot(obstacles_true[:,0], obstacles_true[:,1], 'ko', label='True Centers')
+    axs[0].plot(obstacles_noisy[:,0], obstacles_noisy[:,1], 'ro', label='Noisy Centers')
 
-# --- Goal Position ---
-axs[0].scatter(q_goal[0], q_goal[1],
-               marker='x', s=120, color='orange', linewidths=3, label='Goal')
+    # --- Goal Position ---
+    axs[0].scatter(q_goal[0], q_goal[1],
+                   marker='x', s=120, color='orange', linewidths=3, label='Goal')
 
-# --- draw ellipses for TRUE obstacles
-for i, obs in enumerate(obstacles_true):
-    vx, vy = obstacle_speeds[i]
-    vmag = np.sqrt(vx**2 + vy**2)
-    theta = np.degrees(np.arctan2(vy, vx + 1e-12))
+    # --- draw ellipses for TRUE obstacles
+    for i, obs in enumerate(obstacles_true):
+        vx, vy = obstacle_speeds[i]
+        vmag = np.sqrt(vx**2 + vy**2)
+        theta = np.degrees(np.arctan2(vy, vx + 1e-12))
 
-    # 1) Physical ellipse (dE = 1 boundary)
-    a = a_base[i] + alpha * vmag
-    b = b_base[i] + beta  * vmag
-    ellipse = Ellipse(
-        xy=(obs[0], obs[1]),
-        width=2*a, height=2*b,
-        angle=theta,
-        edgecolor='white', facecolor='none',
-        linestyle='--', linewidth=1.5
-    )
-    axs[0].add_patch(ellipse)
+        # 1) Physical ellipse (dE = 1 boundary)
+        a = a_base[i] + alpha * vmag
+        b = b_base[i] + beta  * vmag
+        ellipse = Ellipse(
+            xy=(obs[0], obs[1]),
+            width=2*a, height=2*b,
+            angle=theta,
+            edgecolor='white', facecolor='none',
+            linestyle='--', linewidth=1.5
+        )
+        axs[0].add_patch(ellipse)
 
-axs[0].set_title("Potential Energy Map with Elliptical Obstacles")
-axs[0].legend()
-plt.colorbar(contour, ax=axs[0])
+    axs[0].set_title("Potential Energy Map with Elliptical Obstacles")
+    axs[0].legend()
+    plt.colorbar(contour, ax=axs[0])
 
-# FORCE FIELD PLOT
-axs[1].quiver(X, Y, U, V, color='black', alpha=0.6)
-axs[1].plot(path[:,0], path[:,1], 'r-', linewidth=2)
-axs[1].set_title("Force Field (Gradient of Potential)")
-axs[1].set_xlabel("X")
-axs[1].set_ylabel("Y")
+    # FORCE FIELD PLOT
+    axs[1].quiver(X, Y, U, V, color='black', alpha=0.6)
+    axs[1].plot(path[:,0], path[:,1], 'r-', linewidth=2)
+    axs[1].set_title("Force Field (Gradient of Potential)")
+    axs[1].set_xlabel("X")
+    axs[1].set_ylabel("Y")
 
-plt.tight_layout()
-plt.savefig("figures/fig_contour_force.png", dpi=300, bbox_inches='tight')
-plt.show()
+    plt.tight_layout()
+    plt.savefig("figures/fig_contour_force.png", dpi=300, bbox_inches='tight')
+    plt.show()
 

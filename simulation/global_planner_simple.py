@@ -40,6 +40,38 @@ class Point:
         return (self.x, self.y)
 
 
+class Obstacle:
+    """
+    Circular obstacle representation for collision checking.
+    
+    Used by RRT planner to check if paths are collision-free.
+    """
+    def __init__(self, position: Point, radius: float):
+        """
+        Initialize obstacle.
+        
+        Args:
+            position: Center point of the obstacle
+            radius: Radius of the circular obstacle
+        """
+        self.position = position
+        self.radius = radius
+    
+    def collides_with(self, point: Point, safety_margin: float = 0.0) -> bool:
+        """
+        Check if a point collides with this obstacle.
+        
+        Args:
+            point: Point to check for collision
+            safety_margin: Additional safety margin around obstacle
+        
+        Returns:
+            True if point is inside obstacle (including safety margin), False otherwise
+        """
+        distance = self.position.distance_to(point)
+        return distance < (self.radius + safety_margin)
+
+
 class GlobalPlanner:
 
     

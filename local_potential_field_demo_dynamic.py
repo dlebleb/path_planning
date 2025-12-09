@@ -14,7 +14,7 @@ from matplotlib.patches import Ellipse
 
 os.makedirs("figures", exist_ok=True)
 
-q_goal = np.array([10, 10]) # goal position
+q_goal = np.array([30, 30]) # goal position
 q = np.array([-20.0, -20.0]) # starting position of the robot
 
 # obstacle coordinates 
@@ -24,11 +24,11 @@ obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.sha
 
 # obstacle speeds
 obstacle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
-obstacle_speeds = obstacle_speeds * 5
+obstacle_speeds = obstacle_speeds * 2
 
 # APF parameters
-k_att, k_rep, d0, dt = 2.0, 40.0, 2.0, 0.01
-max_rep_force = 14.0
+k_att, k_rep, d0, dt = 10.0, 500.0, 3.0, 0.001
+max_rep_force = np.inf
 path_data = [q.copy()]
 initial_obstacles = obstacles_true.copy()
 
@@ -84,7 +84,7 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
         dE = np.sqrt(float((q - obs).T @ Q @ (q - obs)) + 1e-12)
 
         # dynamic avoidance boundary
-        d0_i = 1.2 * max(a, b)
+        d0_i = d0 * max(a, b)
 
         if dE < d0_i:
             F_mag = k_rep * (1/dE - 1/d0_i) * (1/dE**2)
@@ -119,7 +119,7 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
         dE = np.sqrt(float(v.T @ Q @ v) + 1e-12)
         
         # dynamic avoidance boundary
-        d0_i = 1.2 * max(a, b)
+        d0_i = d0 * max(a, b)
 
         if dE < 1e-6:  # avoid division by zero
             dE = 1e-6
@@ -234,7 +234,7 @@ V = np.zeros_like(Y)
 
 # simulate the path
 max_steps = 2000
-tolerance = 0.1
+tolerance = 0.5
 
 for step in range(max_steps):
     
@@ -358,8 +358,8 @@ axs[0].plot(obstacles_noisy[:,0], obstacles_noisy[:,1], 'ro', label='Noisy Cente
 axs[0].scatter(q_goal[0], q_goal[1],
                marker='x', s=120, color='orange', linewidths=3, label='Goal')
 
-# --- draw ellipses for TRUE obstacles
-for i, obs in enumerate(obstacles_true):
+# --- draw ellipses for noisy obstacles
+for i, obs in enumerate(obstacles_noisy):
     vx, vy = obstacle_speeds[i]
     vmag = np.sqrt(vx**2 + vy**2)
     theta = np.degrees(np.arctan2(vy, vx + 1e-12))
@@ -375,6 +375,16 @@ for i, obs in enumerate(obstacles_true):
         linestyle='--', linewidth=1.5
     )
     axs[0].add_patch(ellipse)
+
+    # Add obstacle ID label on ellipse
+    axs[0].text(
+        obs[0], obs[1],
+        f"{i}",                   # obstacle number
+        color="yellow",
+        fontsize=10,
+        ha="center", va="center",
+        weight="bold"
+    )
 
 axs[0].set_title("Potential Energy Map with Elliptical Obstacles")
 axs[0].legend()

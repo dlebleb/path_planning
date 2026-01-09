@@ -14,20 +14,23 @@ from matplotlib.patches import Ellipse
 
 os.makedirs("figures", exist_ok=True)
 
-q_goal = np.array([30, 30]) # goal position
-q = np.array([-20.0, -20.0]) # starting position of the robot
+q_goal = np.array([40, 40]) # goal position
+q = np.array([-40.0, -40.0]) # starting position of the robot
 
 # obstacle coordinates 
-obstacles_true = np.array([[-5,-5], [-3,-3], [3, 3.5], [6,7], [9,9], [8,4], [5,5]])
+# obstacles_true = np.array([[-5,-5], [-3,-3], [3, 3.5], [6,7], [9,9], [8,4], [5,5]])
+obstacles_true = np.array([[-18.0,-10.0], [18,-20], [18, 8], [22,26], [23,15], [-23,15], [5,5]])
+
 sigma = 0.1  # 10 cm uncertainity
 obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 
 # obstacle speeds
 obstacle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
-obstacle_speeds = obstacle_speeds * 2
+obstacle_speeds = obstacle_speeds * 8
 
 # APF parameters
-k_att, k_rep, d0, dt = 10.0, 500.0, 3.0, 0.001
+#k_att, k_rep, d0, dt = 10.0, 500.0, 3.0, 0.001
+k_att, k_rep, d0, dt = 4.0, 10.0, 10.0, 0.01
 max_rep_force = np.inf
 path_data = [q.copy()]
 initial_obstacles = obstacles_true.copy()
@@ -39,11 +42,10 @@ alpha = 1.2   # major scaling (large)
 beta  = 0.3   # minor scaling (small)
 
 # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1])
+sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1]) * 1
 # incorporate static size
-a_base = a0 * sizes
-b_base = b0 * sizes
-
+a_base = a0 * sizes 
+b_base = b0 * sizes 
 
 """
 Dynamic obstacle modeling:
@@ -63,38 +65,34 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     for i, obs in enumerate(obstacles_noisy):
         vx, vy = obstacle_speeds[i]
         vmag = np.sqrt(vx**2 + vy**2) 
-        theta = np.arctan2(vy, vx + 1e-12)  # obstacle motion direction
 
         # dynamic scaling with speed
         a = a_base[i] + alpha * vmag # major axis (velocity direction)
         b = b_base[i] + beta  * vmag # minor axis (perpendicular)
-
-        # rotate into obstacle frame and calculate the Q matrix
-        c, s = np.cos(theta), np.sin(theta)
         
-        # rotation matrix that aligns major axis with velocity
-        R = np.array([[c, s],
-                  [-s,  c]])
-        
-        # Q0 (major axis = a, minor axis = b)
-        Q0 = np.diag([1/a**2, 1/b**2])
-        Q  = R @ Q0 @ R.T
+        # move obstacle center to origin and transform
+        obs_x, obs_y = obs[0], obs[1]
+        # x2, y2 = -obs_x/a, -obs_y/b
 
-        # elliptical distance
-        dE = np.sqrt(float((q - obs).T @ Q @ (q - obs)) + 1e-12)
+        eps = 1e-12
+        # move robot center to origin and transform
+        q_x, q_y = (q[0]-obs_x)/(a+eps), (q[1]-obs_y)/(b+eps)
+
+        # distance of the robot to origin -1
+        dE = np.sqrt(q_x**2 + q_y**2) - 1
 
         # dynamic avoidance boundary
-        d0_i = d0 * max(a, b)
+        # d0_i = d0 * max(a, b)
 
-        if dE < d0_i:
-            F_mag = k_rep * (1/dE - 1/d0_i) * (1/dE**2)
+        if dE < d0:
+            F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
             # yön vektörü (normalize edilmiş fark)
-            grad_Dq = Q @ (q - obs) / (dE + 1e-12)
+            grad_Dq = (q - obs) / (dE + 1e-12)
             # toplam kuvvet
             F_rep = F_mag * grad_Dq
 
-            if np.linalg.norm(F_rep) > max_rep_force: 
-                F_rep = F_rep/(np.linalg.norm(F_rep) + 1e-12)* max_rep_force
+            # if np.linalg.norm(F_rep) > max_rep_force: 
+            #     F_rep = F_rep/(np.linalg.norm(F_rep) + 1e-12)* max_rep_force
         else:
             F_rep = np.array([0.0, 0.0])
         F_rep_total += F_rep
@@ -107,23 +105,20 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
     for i, obs in enumerate(obstacles_noisy):
         vx, vy = obstacle_speeds[i]
         vmag = np.sqrt(vx**2 + vy**2) 
-        theta = np.arctan2(vy, vx + 1e-12)
+
         a = a_base[i] + alpha * vmag 
         b = b_base[i] + beta  * vmag 
-        c, s = np.cos(theta), np.sin(theta)
-        R = np.array([[c, s],
-                      [-s,  c]])
-        Q0 = np.diag([1/a**2, 1/b**2])
-        Q = R @ Q0 @ R.T
-        v = q - obs
-        dE = np.sqrt(float(v.T @ Q @ v) + 1e-12)
         
-        # dynamic avoidance boundary
-        d0_i = d0 * max(a, b)
+        obs_x, obs_y = obs[0], obs[1]
+
+        eps = 1e-12
+        q_x, q_y = (q[0]-obs_x)/(a+eps), (q[1]-obs_y)/(b+eps)
+        
+        dE = np.sqrt(q_x**2 + q_y**2) - 1
 
         if dE < 1e-6:  # avoid division by zero
             dE = 1e-6
-        U_rep = 0.5 * k_rep * (1/dE - 1/d0_i)**2 if dE < d0_i else 0
+        U_rep = 0.5 * k_rep * (1/dE - 1/d0)**2 if dE < d0 else 0
         U_rep_total += U_rep
     return U_att + U_rep_total
 
@@ -135,7 +130,7 @@ def total_force(q, q_goal, obstacles_noisy, obstacle_speeds):
     F_rep = repulsive_force(q, obstacles_noisy, obstacle_speeds)
     return F_att + F_rep
 
-def resolve_obstacle_collisions(obstacles_true, obstacle_speeds):
+# def resolve_obstacle_collisions(obstacles_true, obstacle_speeds):
     N = len(obstacles_true)
 
     # --- compute dynamic radii ---
@@ -209,35 +204,32 @@ def is_collision_check(q, obstacles_noisy, obstacle_speeds):
         a = a_base[i] + alpha * vmag 
         b = b_base[i] + beta  * vmag 
         
-        c, s = np.cos(theta), np.sin(theta)
-        R = np.array([[c, s],
-                  [-s,  c]])
-        Q0 = np.diag([1/a**2, 1/b**2])
-        Q  = R @ Q0 @ R.T
+        obs_x, obs_y = obs[0], obs[1]
 
-        # elliptical distance
-        dE = np.sqrt(float((q - obs).T @ Q @ (q - obs)) + 1e-12)
+        eps = 1e-12
+        q_x, q_y = (q[0]-obs_x)/(a+eps), (q[1]-obs_y)/(b+eps)
+        
+        dE = np.sqrt(q_x**2 + q_y**2) - 1
         
         # COLLISION condition: robot is inside the ellipse
-        if dE < 1.0:
+        if dE < 0:
             counter += 1
             collided_indices.append(i)
     
     return counter, collided_indices
 
-x_range = np.linspace(-40, 40, 50) #-5 ile 15 arasinda 50 esit parca olustur.
-y_range = np.linspace(-40, 40, 50)
+x_range = np.linspace(-250, 250, 50) #-5 ile 15 arasinda 50 esit parca olustur.
+y_range = np.linspace(-250, 250, 50)
 X, Y = np.meshgrid(x_range, y_range)
 Z = np.zeros_like(X)
 U = np.zeros_like(X)
 V = np.zeros_like(Y)
 
 # simulate the path
-max_steps = 2000
+max_steps = 5000
 tolerance = 0.5
 
 for step in range(max_steps):
-    
     # 0) random maneuver (new speeds)
     obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
 
@@ -246,7 +238,7 @@ for step in range(max_steps):
     obstacles_true[:,1] += obstacle_speeds[:,1]*dt
 
     # 1.1) resolve collisions between obstacles (prevent overlap)
-    resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
+    # resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
 
     # 2) robot observes obstacles (noisy)
     obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)

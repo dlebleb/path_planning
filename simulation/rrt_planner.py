@@ -20,11 +20,8 @@ Designed to work with:
 import math
 import random
 from typing import List, Optional
-<<<<<<< HEAD
 from global_planner_simple import Point, Obstacle
-=======
-from path_planner import Point, Obstacle
->>>>>>> 6c55c7a4f4e698ec083b455e4f28d5a891c5e843
+
 
 
 class RRTNode:
@@ -295,19 +292,13 @@ class RRTPlanner:
 
 def main():
     """Simple example"""
-<<<<<<< HEAD
-=======
     from path_planner import DEFAULT_OBSTACLES
     
->>>>>>> 6c55c7a4f4e698ec083b455e4f28d5a891c5e843
     rrt = RRTPlanner(step_size=0.3, max_iterations=2000)
     
     start = Point(0.0, 0.0)
     goal = Point(4.0, 4.0)
-<<<<<<< HEAD
-=======
     obstacles = DEFAULT_OBSTACLES
->>>>>>> 6c55c7a4f4e698ec083b455e4f28d5a891c5e843
     bounds = (-1.0, 5.0, -1.0, 5.0)
     
     print("Planning RRT path...")

@@ -12,7 +12,6 @@ import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import Ellipse
 from typing import List, Optional, Tuple
-
 from global_planner_simple import Point, Obstacle, GlobalPlanner
 from rrt_planner import RRTPlanner
 import time
@@ -23,36 +22,118 @@ import time
 
 os.makedirs("figures", exist_ok=True)
 
-q_goal = np.array([10, 10])  # goal position
+q_goal = np.array([10, 10])   # goal position
 q = np.array([-20.0, -20.0])  # starting position of the robot
 
-# obstacle coordinates 
-obstacles_true = np.array([[-5,-5], [-3,-3], [3, 3.5], [6,7], [9,9], [8,4], [5,5]])
-sigma = 0.1  # 10 cm uncertainty
+# ---------------------------------------------------------------------------
+# Human-like dynamic obstacles
+# Each obstacle is one "agent": walker, walker+box, bike, scooter, etc.
+# ---------------------------------------------------------------------------
+
+# Fixed initial positions (you can keep these)
+obstacles_true = np.array([
+    [-5, -5],   # 0
+    [-3, -3],   # 1
+    [ 3,  3.5], # 2
+    [ 6,  7],   # 3
+    [ 9,  9],   # 4
+    [ 8,  4],   # 5
+    [ 5,  5],   # 6
+])
+
+sigma = 0.1  # 10 cm observation noise
 obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 
-# obstacle speeds
-obstacle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
-obstacle_speeds = obstacle_speeds * 5
+# Obstacle "types" – one label per obstacle
+# 0: normal walker
+# 1: walker with box (bigger, slower)
+# 2: bike
+# 3: scooter
+# 4: fast walker
+# 5: normal walker
+# 6: walker with box
+obstacle_types = [
+    "walker",
+    "walker_with_box",
+    "bike",
+    "scooter",
+    "fast_walker",
+    "walker",
+    "walker_with_box",
+]
 
-# APF parameters
+# Parameters per type:
+# - base semi-axes (a_base, b_base) in meters
+# - speed range (v_min, v_max) in m/s
+TYPE_PARAMS = {
+    "walker": {
+        "a": 0.40, "b": 0.30,        # roughly human footprint
+        "v_min": 0.8, "v_max": 1.4,  # walking speed
+    },
+    "walker_with_box": {
+        "a": 0.60, "b": 0.40,        # bulkier footprint
+        "v_min": 0.4, "v_max": 1.0,  # slower
+    },
+    "bike": {
+        "a": 0.90, "b": 0.30,        # long and narrow
+        "v_min": 2.0, "v_max": 4.0,  # faster
+    },
+    "scooter": {
+        "a": 0.75, "b": 0.25,        # slightly shorter than bike
+        "v_min": 1.5, "v_max": 3.0,
+    },
+    "fast_walker": {
+        "a": 0.40, "b": 0.30,
+        "v_min": 1.4, "v_max": 2.0,
+    },
+}
+
+# Mild dynamic scaling based on speed (not huge like before)
+alpha = 0.3   # how much a (major axis) grows with speed
+beta  = 0.1   # how much b (minor axis) grows with speed
+
+def init_obstacle_params(positions, types):
+    """
+    Initialize base ellipse sizes (a_base, b_base) and initial velocities
+    for each obstacle, based on its "agent" type.
+    """
+    N = len(positions)
+    a_base = np.zeros(N)
+    b_base = np.zeros(N)
+    speeds = np.zeros((N, 2))
+
+    for i, t in enumerate(types):
+        params = TYPE_PARAMS[t]
+        a_base[i] = params["a"]
+        b_base[i] = params["b"]
+
+        # Sample a speed in the given range
+        vmag = np.random.uniform(params["v_min"], params["v_max"])
+
+        # Random initial direction
+        theta = np.random.uniform(-np.pi, np.pi)
+        vx = vmag * np.cos(theta)
+        vy = vmag * np.sin(theta)
+        speeds[i] = [vx, vy]
+
+    return a_base, b_base, speeds
+
+# Initialize obstacle geometry + velocities
+a_base, b_base, obstacle_speeds = init_obstacle_params(obstacles_true, obstacle_types)
+
+# ---------------------------------------------------------------------------
+# APF parameters (same as before)
+# ---------------------------------------------------------------------------
 k_att, k_rep, d0, dt = 2.0, 40.0, 2.0, 0.01
-max_rep_force = 14.0
+max_rep_force = 12.0
 path_data = [q.copy()]
 initial_obstacles = obstacles_true.copy()
 
-# elliptical obstacles
-a0 = 2.0  # major axis (along velocity direction)
-b0 = 1.0  # minor axis (perpendicular to velocity direction)
-alpha = 1.2   # major scaling (large)
-beta  = 0.3   # minor scaling (small)
-
-# each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1])
-# incorporate static size
-a_base = a0 * sizes
-b_base = b0 * sizes
-
+# (a_base, b_base, alpha, beta, obstacle_speeds are now human-like)
+print("Initialized human-like obstacles:")
+for i, t in enumerate(obstacle_types):
+    vmag = np.linalg.norm(obstacle_speeds[i])
+    print(f"  Obstacle {i}: type={t}, a_base={a_base[i]:.2f}, b_base={b_base[i]:.2f}, |v|={vmag:.2f} m/s")
 
 """
 Dynamic obstacle modeling:
@@ -70,41 +151,31 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     F_rep_total = np.array([0.0, 0.0])
     for i, obs in enumerate(obstacles_noisy):
         vx, vy = obstacle_speeds[i]
-        vmag = np.sqrt(vx**2 + vy**2) 
-        theta = np.arctan2(vy, vx + 1e-12)  # obstacle motion direction
+        vmag = np.hypot(vx, vy)
+        theta = np.arctan2(vy, vx + 1e-12)
 
-        # dynamic scaling with speed
-        a = a_base[i] + alpha * vmag  # major axis (velocity direction)
-        b = b_base[i] + beta  * vmag  # minor axis (perpendicular)
+        a = a_base[i] + alpha * vmag
+        b = b_base[i] + beta  * vmag
 
-        # rotate into obstacle frame and calculate the Q matrix
         c, s = np.cos(theta), np.sin(theta)
-        
-        # rotation matrix that aligns major axis with velocity
-        R = np.array([[c, s],
-                      [-s,  c]])
-        
-        # Q0 (major axis = a, minor axis = b)
-        Q0 = np.diag([1/a**2, 1/b**2])
-        Q  = R @ Q0 @ R.T
+        R = np.array([[c, s], [-s, c]])
+        Q = R @ np.diag([1/a**2, 1/b**2]) @ R.T
 
-        # elliptical distance
-        dE = np.sqrt(float((q - obs).T @ Q @ (q - obs)) + 1e-12)
-
-        # dynamic avoidance boundary
+        dE = np.sqrt((q - obs).T @ Q @ (q - obs) + 1e-12)
         d0_i = 1.2 * max(a, b)
 
         if dE < d0_i:
             F_mag = k_rep * (1/dE - 1/d0_i) * (1/dE**2)
             grad_Dq = Q @ (q - obs) / (dE + 1e-12)
             F_rep = F_mag * grad_Dq
-
-            if np.linalg.norm(F_rep) > max_rep_force: 
-                F_rep = F_rep/(np.linalg.norm(F_rep) + 1e-12)* max_rep_force
+            # Clip to max repulsive force
+            if np.linalg.norm(F_rep) > max_rep_force:
+                F_rep = F_rep / np.linalg.norm(F_rep) * max_rep_force
         else:
-            F_rep = np.array([0.0, 0.0])
+            F_rep = np.zeros(2)  # ignore distant obstacles
         F_rep_total += F_rep
     return F_rep_total
+
 
 def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
     U_rep_total = 0
@@ -205,31 +276,30 @@ def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
 
 def is_collision_check(q, obstacles_noisy, obstacle_speeds):
     collided_indices = []
-    counter = 0
+    min_dE = float("inf")
 
     for i, obs in enumerate(obstacles_noisy):
         vx, vy = obstacle_speeds[i]
-        vmag = np.sqrt(vx**2 + vy**2) 
+        vmag = np.hypot(vx, vy)
         theta = np.arctan2(vy, vx + 1e-12)
-               
-        a = a_base[i] + alpha * vmag 
-        b = b_base[i] + beta  * vmag 
-        
-        c, s = np.cos(theta), np.sin(theta)
-        R = np.array([[c, s],
-                      [-s,  c]])
-        Q0 = np.diag([1/a**2, 1/b**2])
-        Q  = R @ Q0 @ R.T
 
-        # elliptical distance
-        dE = np.sqrt(float((q - obs).T @ Q @ (q - obs)) + 1e-12)
-        
-        # COLLISION condition: robot is inside the ellipse
-        if dE < 1.0:
-            counter += 1
+        a = a_base[i] + alpha * vmag
+        b = b_base[i] + beta  * vmag
+
+        c, s = np.cos(theta), np.sin(theta)
+        R = np.array([[c, s], [-s, c]])
+        Q = R @ np.diag([1/a**2, 1/b**2]) @ R.T
+
+        dE = np.sqrt((q - obs).T @ Q @ (q - obs) + 1e-12)
+        min_dE = min(min_dE, dE)
+
+        COLLISION_THRESHOLD = 1.0
+        if dE < COLLISION_THRESHOLD:
             collided_indices.append(i)
-    
-    return counter, collided_indices
+
+    return len(collided_indices), collided_indices, min_dE
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +358,9 @@ class RRT_PotentialSystem:
             replan_interval: Replan RRT every N steps (0 = never replan)
             tsp_replan_interval: Replan TSP every N seconds (default: 5.0)
         """
+        # Initialize RRT planner (handles collision-free pathfinding)
         self.rrt = RRTPlanner(step_size=rrt_step_size, max_iterations=rrt_max_iter)
+        # Initialize TSP planner (optimizes waypoint order)
         self.global_planner = GlobalPlanner(replan_interval=tsp_replan_interval)
         
         self.rrt_waypoints: Optional[List["Point"]] = None
@@ -298,9 +370,9 @@ class RRT_PotentialSystem:
         self.waypoint_reached_threshold = 0.3
         
         # Dynamic replanning parameters
-        self.replan_interval = replan_interval
+        self.replan_interval = replan_interval  # RRT replans every N simulation steps
         self.last_replan_step = 0
-        self.start_time = time.time()
+        self.start_time = time.time()  # For TSP time-based replanning
     
     def _generate_simple_waypoints(self, start: "Point", goal: "Point", 
                                     obstacles_rrt: List["Obstacle"],
@@ -345,30 +417,45 @@ class RRT_PotentialSystem:
                          waypoints: Optional[List["Point"]] = None) -> bool:
         """
         Plan global path using TSP for waypoint ordering, then RRT for pathfinding.
+        
+        Now uses TANGENT WAYPOINTS around obstacles (matching the image approach).
         Returns True if path found, False otherwise.
         """
-        # Generate waypoints if not provided
-        if waypoints is None:
-            waypoints = self._generate_simple_waypoints(start, goal, obstacles_rrt)
-        
-        # Use TSP to optimize waypoint order
+        # STEP 1: Generate tangent waypoints around obstacles (if not provided)
+        # This replaces the old simple waypoint generation with true tangent points
         current_time = time.time() - self.start_time
         if self.global_planner.should_replan(current_time) or self.tsp_waypoint_order is None:
-            self.tsp_waypoint_order = self.global_planner.plan_path(start, goal, waypoints)
-            self.current_waypoint_index = 0
+            if waypoints is None:
+                # Use tangent waypoint generation (NEW - matches the image!)
+                # This generates waypoints on obstacle boundaries where lines from start/goal are tangent
+                # plan_path now automatically generates tangent waypoints and optimizes order with TSP
+                self.tsp_waypoint_order = self.global_planner.plan_path(start, goal, obstacles_rrt)
+            else:
+                # Use provided waypoints (for custom waypoint sets)
+                # Need to use optimize_waypoint_order directly since we have custom waypoints
+                self.tsp_waypoint_order = self.global_planner.optimize_waypoint_order(start, waypoints, goal)
+            self.current_waypoint_index = 0  # Start at first TSP waypoint
             self.current_rrt_index = 0
         
-        # Get current target waypoint from TSP order
+        # STEP 2: Get the current target waypoint from TSP order
+        # Skip start position (index 0) - we're already there
         if not self.tsp_waypoint_order or self.current_waypoint_index >= len(self.tsp_waypoint_order):
-            target = goal
+            target = goal  # All TSP waypoints visited, go directly to goal
+        elif self.current_waypoint_index == 0:
+            # Skip start position, go to first actual waypoint
+            if len(self.tsp_waypoint_order) > 1:
+                self.current_waypoint_index = 1
+                target = self.tsp_waypoint_order[self.current_waypoint_index]
+            else:
+                target = goal
         else:
-            target = self.tsp_waypoint_order[self.current_waypoint_index]
+            target = self.tsp_waypoint_order[self.current_waypoint_index]  # Current TSP waypoint
         
-        # Plan RRT path to current target
+        # STEP 3: Use RRT to plan collision-free path from current position to target
         self.rrt_waypoints = self.rrt.plan_path(start, target, obstacles_rrt, bounds)
         
         if self.rrt_waypoints:
-            self.current_rrt_index = 0  # Reset RRT index
+            self.current_rrt_index = 0  # Reset to start of new RRT path
             return True
         else:
             self.current_rrt_index = 0
@@ -388,18 +475,19 @@ class RRT_PotentialSystem:
         current_point = Point(current_pos[0], current_pos[1])
         current_target = self.get_current_target()
         
-        # Check if we've reached the current RRT waypoint
+        # Check if robot has reached the current RRT waypoint
         if current_target and current_point.distance_to(current_target) < self.waypoint_reached_threshold:
-            self.current_rrt_index += 1
+            self.current_rrt_index += 1  # Move to next RRT waypoint
             
-            # Check if we've completed the RRT path to current TSP waypoint
+            # Check if we've completed the entire RRT path to the current TSP waypoint
             if self.current_rrt_index >= len(self.rrt_waypoints):
-                # Check if we've reached the TSP waypoint
+                # Verify we actually reached the TSP waypoint
                 if self.tsp_waypoint_order and self.current_waypoint_index < len(self.tsp_waypoint_order):
                     tsp_wp = self.tsp_waypoint_order[self.current_waypoint_index]
                     if current_point.distance_to(tsp_wp) < self.waypoint_reached_threshold:
+                        # Successfully reached TSP waypoint! Move to next one
                         self.current_waypoint_index += 1
-                        self.rrt_waypoints = None  # Force RRT replan to next waypoint
+                        self.rrt_waypoints = None  # Force RRT to replan to next TSP waypoint
                         self.current_rrt_index = 0
                 else:
                     # Completed all RRT waypoints, need new path
@@ -407,14 +495,14 @@ class RRT_PotentialSystem:
                     self.current_rrt_index = 0
     
     def should_replan(self, current_step: int) -> bool:
-        """Check if it's time to replan RRT path"""
+        """Check if it's time to replan RRT path (every N simulation steps)"""
         if self.replan_interval == 0:
             return False
         
         return (current_step - self.last_replan_step) >= self.replan_interval
     
     def should_replan_tsp(self) -> bool:
-        """Check if it's time to replan TSP waypoint order"""
+        """Check if it's time to replan TSP waypoint order (every N seconds)"""
         current_time = time.time() - self.start_time
         return self.global_planner.should_replan(current_time)
     
@@ -440,18 +528,19 @@ V = np.zeros_like(Y)
 # ---------------------------------------------------------------------------
 
 # NOTE: You must have real implementations of Point, Obstacle, RRTPlanner.
+# Initialize integrated system: TSP (waypoint optimization) + RRT (path planning) + Potential Fields (local navigation)
 rrt_system = RRT_PotentialSystem(rrt_step_size=1.0,
                                  rrt_max_iter=1000,
-                                 replan_interval=200,
-                                 tsp_replan_interval=5.0)
+                                 replan_interval=200,  # RRT replans every 200 steps
+                                 tsp_replan_interval=5.0)  # TSP replans every 5 seconds
 
 start_point = Point(q[0], q[1])
 goal_point  = Point(q_goal[0], q_goal[1])
 
-# initial RRT obstacles snapshot
+# Convert dynamic elliptical obstacles to circular obstacles for RRT collision checking
 obstacles_rrt = convert_obstacles_for_rrt(obstacles_true, obstacle_speeds)
 
-# plan initial global path
+# Plan initial global path: TSP optimizes waypoint order, then RRT plans path to first waypoint
 rrt_system.plan_global_path(
     start_point,
     goal_point,
@@ -484,7 +573,8 @@ for step in range(max_steps):
     # 3) RRT global planning + APF local force calculation -------------------
     obstacles_rrt = convert_obstacles_for_rrt(obstacles_true, obstacle_speeds)
 
-    # Check if TSP needs replanning
+    # Check if TSP needs replanning (every 5 seconds)
+    # TSP optimizes the order of waypoints to minimize total travel distance
     if rrt_system.should_replan_tsp():
         rrt_system.plan_global_path(
             Point(q[0], q[1]),  # current position as start
@@ -494,7 +584,8 @@ for step in range(max_steps):
         )
         rrt_system.last_replan_step = step
     
-    # Check if RRT needs replanning
+    # Check if RRT needs replanning (every 200 steps or if no path exists)
+    # RRT plans collision-free path from current position to current TSP waypoint
     if rrt_system.should_replan(step) or rrt_system.rrt_waypoints is None:
         rrt_system.plan_global_path(
             Point(q[0], q[1]),  # current position as start
@@ -504,22 +595,24 @@ for step in range(max_steps):
         )
         rrt_system.last_replan_step = step
 
+    # Get the current target: either next RRT waypoint or fallback to goal
     current_target_point = rrt_system.get_current_target()
     if current_target_point is not None:
         q_target = np.array([current_target_point.x, current_target_point.y])
     else:
         q_target = q_goal  # fallback to global goal
 
+    # Potential field calculates force toward target (attractive) and away from obstacles (repulsive)
     F = total_force(q, q_target, obstacles_noisy, obstacle_speeds)
 
-    # 4) robot moves
+    # 4) robot moves based on potential field force
     q = q + F * dt
 
-    # 4.1) update RRT waypoint tracking
+    # 4.1) Update waypoint tracking: check if we reached current RRT waypoint or TSP waypoint
     rrt_system.update_waypoint(q)
 
     # 5) collision check
-    count, hits = is_collision_check(q, obstacles_noisy, obstacle_speeds)
+    count, hits, min_dE = is_collision_check(q, obstacles_noisy, obstacle_speeds)
     if count > 0:
         print("Collision detected with obstacle:", hits)
 

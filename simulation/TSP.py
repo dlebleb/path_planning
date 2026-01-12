@@ -1,23 +1,15 @@
 """
-Global Path Planner using TSP (Traveling Salesman Problem) with Tangent Waypoints.
+TSP (Traveling Salesman Problem) Path Planner with Tangent Waypoints.
 
 This planner:
-1. Generates tangent waypoints around obstacles 
+1. Generates tangent waypoints around obstacles (relative to obstacle centers)
 2. Uses TSP to optimize the order of visiting these waypoints
 3. Works with RRT for path planning between waypoints
 
-Purpose:
-- Generate waypoints that are tangent to obstacles (smooth navigation around obstacles)
-- Optimize the order in which waypoints are visited to minimize total travel distance
-- Replan every 5 seconds to adapt to robot's current position
-
-Algorithm:
-1. Find obstacles between start and goal
-2. Compute tangent points on each obstacle (where lines from start/goal are tangent)
-3. Use TSP (Nearest-Neighbor) to order waypoints optimally
-4. RRT plans collision-free paths between ordered waypoints
-
-This creates paths that smoothly navigate around obstacles, similar to the image.
+The robot uses:
+- TSP to generate tangent waypoints around obstacles
+- TSP to optimize waypoint order (minimize total travel distance)
+- Replans every 5 seconds to adapt to robot's current position
 """
 
 import math
@@ -93,9 +85,9 @@ class GlobalPlanner:
             safety_margin: Safety margin for tangent waypoints (default: 0.3)
         """
         self.replan_interval = replan_interval
-        self.last_replan_time = 0.0  # Timestamp of last replanning
-        self.current_waypoint_order: List[Point] = []  # Current optimized sequence
-        self.safety_margin = safety_margin  # Safety margin for waypoints
+        self.last_replan_time = 0.0
+        self.current_waypoint_order: List[Point] = []
+        self.safety_margin = safety_margin
     
     def compute_tangent_waypoints(self, start: Point, goal: Point, 
                                   obstacles: List[Obstacle]) -> List[Point]:

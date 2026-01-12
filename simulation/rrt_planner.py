@@ -1,10 +1,9 @@
 """
-Simple RRT (Rapidly-exploring Random Tree) Path Planner.
+RRT (Rapidly-exploring Random Tree) Path Planner.
 
-This module implements a basic RRT algorithm for generating collision-free paths
-between waypoints while avoiding obstacles.
+This planner generates collision-free paths between waypoints while avoiding obstacles.
 
-RRT Algorithm Overview:
+RRT Algorithm:
 1. Start with a tree containing only the start position
 2. Randomly sample points in the workspace
 3. Find the nearest node in the tree to the sampled point
@@ -13,14 +12,14 @@ RRT Algorithm Overview:
 6. Repeat until goal is reached or max iterations
 
 Designed to work with:
-- Global planner (TSP) for waypoint ordering
+- TSP planner for waypoint ordering
 - Potential fields for dynamic obstacle avoidance
 """
 
 import math
 import random
 from typing import List, Optional
-from global_planner_simple import Point, Obstacle
+from TSP import Point, Obstacle
 
 
 

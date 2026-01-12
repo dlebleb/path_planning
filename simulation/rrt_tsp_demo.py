@@ -11,7 +11,7 @@ This creates paths similar to the image, where waypoints are tangent to obstacle
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
-from global_planner_simple import Point, Obstacle, GlobalPlanner
+from TSP import Point, Obstacle, GlobalPlanner
 from rrt_planner import RRTPlanner
 
 

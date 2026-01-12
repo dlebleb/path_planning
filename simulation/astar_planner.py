@@ -1,10 +1,11 @@
 """
 A* Path Planner for comparison with the TSP + RRT + Potential Field system.
 
-This script plans a collision-free path from start to goal on a 2D grid using
-A* search with an 8-connected neighborhood. It uses the same obstacle layout
-and conservative radii as the integrated system (elliptical obstacles are
-approximated as circles with max axis length plus a small safety margin).
+This planner finds optimal collision-free paths from start to goal on a 2D grid
+using A* search with an 8-connected neighborhood. 
+
+Uses the same obstacle layout as the integrated system (elliptical obstacles are
+approximated as circles with max axis length plus safety margin).
 
 Run directly to see a plotted path:
     python astar_planner.py
@@ -19,15 +20,11 @@ from typing import Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Scenario setup (matches complete_system3.py)
-# ---------------------------------------------------------------------------
-
-# defining the start and goal positions
+# Setup: Start, Goal, Obstacles
 START = np.array([-20.0, -20.0])
-GOAL = np.array([10.0, 10.0])
+GOAL = np.array([15.0, 15.0])  # Moved away from obstacles to ensure it's collision-free
 
-# Obstacles (centers) — same as complete_system3.py
+# Obstacle centers
 obstacles_true = np.array(
     [[-5, -5], [-3, -3], [3, 3.5], [6, 7], [9, 9], [8, 4], [5, 5]]
 )
@@ -45,7 +42,7 @@ obstacle_speeds = np.array(
     ]
 ) * 5
 
-# Ellipse parameters (same as complete_system3)
+# Ellipse parameters
 a0 = 2.0
 b0 = 1.0
 alpha = 1.2
@@ -55,18 +52,16 @@ a_base = a0 * sizes
 b_base = b0 * sizes
 SAFETY_MARGIN = 0.5
 
-# function to convert the elliptical obstacles to circular obstacles with a safety margin
 def elliptical_to_radius(i: int) -> float:
-    """Conservative circular radius for obstacle i (max axis + margin)."""
+    """Convert elliptical obstacle to circular radius (max axis + margin)."""
     vx, vy = obstacle_speeds[i]
     vmag = math.hypot(vx, vy)
     a = a_base[i] + alpha * vmag
     b = b_base[i] + beta * vmag
     return max(a, b) + SAFETY_MARGIN
 
-# function to build the circular obstacles (easier for collision checking)
 def build_circular_obstacles() -> List[Tuple[float, float, float]]:
-    """Return list of (x, y, radius) obstacles."""
+    """Build circular obstacles from elliptical obstacles for collision checking."""
     obstacles = []
     for i in range(len(obstacles_true)):
         x, y = obstacles_true[i]

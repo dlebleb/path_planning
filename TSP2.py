@@ -255,6 +255,7 @@ for vline in valid_lines:
     p_start = vline["p2"]       # corner
     p_goal  = vline["p2_goal"]  # goal
     hit_rects = vline["hit_rects"] #intersected rectangles
+    p1_before = vline["p1"] # actual start of green lines
 
     # --- 1) corner -> goal test ---
     enters_any = False
@@ -277,6 +278,7 @@ for vline in valid_lines:
         eq_new = line_mb(p_start,p_goal)
 
         valid_lines2.append({
+            "p1_before": p1_before.copy(),
             "p1": p_start.copy(),
             "p2": p_goal.copy(),
             "p2_goal": p_goal.copy(),
@@ -300,7 +302,7 @@ for vline in valid_lines:
             
             intersects_any = False
 
-            for rect2 in hit_rects:
+            for rect2 in rect_obstacles:
                 idx2 = rect_obstacles.index(rect2)
                 expanded2 = expanded_rects[idx2]
 
@@ -319,6 +321,7 @@ for vline in valid_lines:
             eq_new = line_mb(p_start, corner)
 
             valid_lines2.append({
+                "p1_before": p1_before.copy(),
                 "p1": p_start.copy(),
                 "p2": corner.copy(),
                 "p2_goal": p_goal.copy(),
@@ -329,10 +332,7 @@ for vline in valid_lines:
 
 print(valid_lines2[3])
 
-
-
-
-
+print(line_store2[0,6])
 
 
 

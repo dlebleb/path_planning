@@ -159,7 +159,48 @@ def point_in_rect(pt, rect):
     x, y, w, h = rect
     return (x <= X <= x + w) and (y <= Y <= y + h)
 
+# this is wrong
 # store the lines that intersect the rectangle
+# line_store2 = {}
+
+# for (i, j), data in line_store.items():
+#     p1 = np.array(data["p1"])
+#     p2 = np.array(data["p2"])
+#     eq = data["equation"]
+
+#     hit_rects = []
+
+#     # 1) radius approximation
+#     for rect in rect_obstacles:
+#         center, radius = computeRectangleCircumcircle(rect)
+#         d = point_to_line_distance(eq, center)
+#         if d < radius:
+#             hit_rects.append(rect)
+
+#     # 2) if the distance of the line wrt. rectangle center is < r
+#     # check if we are inside the rectangular area
+#     if len(hit_rects) > 0:
+#         enters_expanded = False
+#         for erect in expanded_rects:
+#             for t in np.linspace(0, 1, 50):
+#                 p = p1 + t * (p2 - p1)
+#                 if point_in_rect(p, erect):
+#                     enters_expanded = True
+#                     break
+#             if enters_expanded:
+#                 break
+#     else:
+#         enters_expanded = False
+
+#     # 3) and then store the lines that intercept the rectangle
+#     if enters_expanded:
+#         line_store2[(i, j)] = {
+#             "p1": p1,
+#             "p2": p2,
+#             "equation": eq,
+#             "hit_rects": hit_rects
+#         }
+
 line_store2 = {}
 
 for (i, j), data in line_store.items():
@@ -167,38 +208,38 @@ for (i, j), data in line_store.items():
     p2 = np.array(data["p2"])
     eq = data["equation"]
 
-    hit_rects = []
+    true_hit_rects = []   # <-- reset for each line
 
-    # 1) radius approximation
-    for rect in rect_obstacles:
+    for rect, erect in zip(rect_obstacles, expanded_rects):
+
+        # 1) radius approximation (coarse filter)
         center, radius = computeRectangleCircumcircle(rect)
         d = point_to_line_distance(eq, center)
-        if d < radius:
-            hit_rects.append(rect)
+        if d >= radius:
+            continue
 
-    # 2) if the distance of the line wrt. rectangle center is < r
-    # check if we are inside the expanded rectangular area
-    if len(hit_rects) > 0:
-        enters_expanded = False
-        for erect in expanded_rects:
-            for t in np.linspace(0, 1, 50):
-                p = p1 + t * (p2 - p1)
-                if point_in_rect(p, erect):
-                    enters_expanded = True
-                    break
-            if enters_expanded:
+        # 2) actual check on the SAME expanded rect
+        hit_this_rect = False
+        for t in np.linspace(0, 1, 100):
+            p = p1 + t * (p2 - p1)
+            if point_in_rect(p, erect):
+                hit_this_rect = True
                 break
-    else:
-        enters_expanded = False
 
-    # 3) and then store the lines that intercept the rectangle
-    if enters_expanded:
+        if hit_this_rect:
+            true_hit_rects.append(rect)
+
+    # <-- rect loop is over, now save it inside the line_store2
+    if len(true_hit_rects) > 0:
         line_store2[(i, j)] = {
             "p1": p1,
             "p2": p2,
             "equation": eq,
-            "hit_rects": hit_rects
+            "hit_rects": true_hit_rects
         }
+
+print(line_store2[0,6])
+
 
 # recursive search / iterative deepening obstacle-avoiding path search
 valid_lines = []
@@ -247,7 +288,6 @@ for key,data in line_store2.items():
         # if it does not enter the expanded rectangle
         if not enters_expanded:
             valid_lines.append(line)
-
 
 valid_lines2 = []
 for vline in valid_lines:
@@ -329,10 +369,6 @@ for vline in valid_lines:
                 "equation": eq_new
             })
 
-
-print(valid_lines2[3])
-
-print(line_store2[0,6])
 
 
 

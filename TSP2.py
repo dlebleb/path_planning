@@ -239,7 +239,7 @@ for (i, j), data in line_store.items():
         }
 
 print(line_store2[0,6])
-
+print(line_store2[2,6])
 
 # recursive search / iterative deepening obstacle-avoiding path search
 valid_lines = []
@@ -374,6 +374,23 @@ for vline in valid_lines:
 
 
 
+target_p2 = np.array([-48., 20.])
+target_p1 = np.array([-30., -35.])
+
+found = False
+
+for key, data in line_store2.items():
+    if np.allclose(data["p1"], target_p1) and np.allclose(data["p2"], target_p2):
+        print("FOUND line_store2 entry for (-40,-40) -> (15,-2)")
+        print("key:", key)
+        print("p1:", data["p1"])
+        print("p2:", data["p2"])
+        print("hit_rects:", data["hit_rects"])
+        found = True
+        break
+
+if not found:
+    print("This line is NOT in line_store2")
 
 
 

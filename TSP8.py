@@ -116,22 +116,6 @@ def computeRectangleCircumcircle(rect):
     
     return center, radius
 
-# store lines between waypoints, start and goal
-line_store = {}  
-all_points = np.vstack([q, q_goal, waypoints])
-n = all_points.shape[0]
-for i in range(n):
-    for j in range(i+1, n):
-        p1 = (float(all_points[i,0]), float(all_points[i,1]))
-        p2 = (float(all_points[j,0]), float(all_points[j,1]))
-        eq = line_mb(p1, p2)
-
-        # store p1, p2 and the equation
-        line_store[(i, j)] = {
-            "p1": p1,
-            "p2": p2,
-            "equation": eq
-        }
 
 def eq_to_abc(eq):
     # eq: ('normal', m, b)  or ('vertical', x0) or ('horizontal', y0)
@@ -168,11 +152,11 @@ def point_in_rect(pt, rect):
     x, y, w, h = rect
     return (x <= X <= x + w) and (y <= Y <= y + h)
 
-line_store2 = {}
-for (i, j), data in line_store.items():
-    p1 = np.array(data["p1"])
-    p2 = np.array(data["p2"])
-    eq = data["equation"]
+def check_rectHit(line_store): # checks whether a line intersects with rectangle, and store intersected lines in line_store2
+    line_store_hit = {}
+    p1 = np.array(line_store["p1"])
+    p2 = np.array(line_store["p2"])
+    eq = line_store["eq"]
 
     true_hit_rects = []   # <-- reset for each line
 
@@ -197,20 +181,33 @@ for (i, j), data in line_store.items():
 
     # <-- rect loop is over, now save it inside the line_store2
     if len(true_hit_rects) > 0:
-        line_store2[(i, j)] = {
+        line_store_hit = {
             "p1": p1,
             "p2": p2,
-            "equation": eq,
-            "hit_rects": true_hit_rects
+            "hit_rects": true_hit_rects,
+            "weight": line_store["weight"]
         }
 
+    if not line_store_hit:
+        line_store_hit = {
+            "p1_before": p1,
+            "p1": p1, 
+            "p2": p2,  
+            "p2_goal": p2,
+            "hit_rects": 0,
+            "weight": line_store["weight"] + calculateDistance(p1,p2)
+        } ## condition if there is no obstacle along the way
+    return line_store_hit
 
 # recursive search / iterative deepening obstacle-avoiding path search
-valid_lines = []
-for key,data in line_store2.items():
-    p1 = data["p1"]
-    p2 = data["p2"]
-    hit_rects = data["hit_rects"]
+def gotoCorner(mygreen_lines):
+    valid_lines = []
+    p1 = mygreen_lines["p1"]
+    p2 = mygreen_lines["p2"]
+    hit_rects = mygreen_lines["hit_rects"]
+
+    if hit_rects == 0: # if there is no intersection, we don't take further action.
+        return mygreen_lines
 
     if len(hit_rects) == 1:
         chosen_rect = hit_rects[0]
@@ -229,13 +226,14 @@ for key,data in line_store2.items():
     corners = rectangle_corners_center(chosen_expanded)[:-1]  # remove the center
     candidate_lines = []
     for corner in corners:
-        eq_new = line_mb(tuple(p1), corner)
         candidate_lines.append({
             "p1": np.array(p1),
             "p2": np.array(corner),
             "p2_goal": np.array(p2),
             "hit_rects": hit_rects,
-            "equation": eq_new
+            "weight": mygreen_lines["weight"] + calculateDistance(p1,corner),
+            "p1_before": np.vstack([np.array(p1),np.array(corner)])
+
         })
 
     for line in candidate_lines:
@@ -253,13 +251,18 @@ for key,data in line_store2.items():
         if not enters_expanded:
             valid_lines.append(line)
 
-valid_lines2 = []
-for vline in valid_lines:
+    return valid_lines
 
-    p_start = vline["p2"]       # corner
-    p_goal  = vline["p2_goal"]  # goal
-    hit_rects = vline["hit_rects"] # intersected rectangles
-    p1_before = vline["p1"] # actual start of green lines
+def gotoCorner2(visited, myblue_line, goal):
+    valid_lines2 = []
+    p_start = myblue_line["p2"]       # corner
+    p_goal  = myblue_line["p2_goal"]  # goal
+    p1_before = myblue_line["p1_before"] # actual start of green lines
+    myblue_line = check_rectHit(myblue_line)
+    hit_rects = myblue_line["hit_rects"] # intersected rectangles
+
+    #if np.allclose(p_start,p_goal):
+        #return myblue_line
 
     # --- 1) corner -> goal test ---
     enters_any = False
@@ -279,17 +282,26 @@ for vline in valid_lines:
 
     # --- 2) We go to goal directly ---
     if not enters_any:
-        eq_new = line_mb(p_start,p_goal)
 
         valid_lines2.append({
-            "p1_before": p1_before.copy(),
+            "p1_before": np.vstack([p1_before.copy(),p_goal.copy()]),
             "p1": p_start.copy(),
             "p2": p_goal.copy(),
             "p2_goal": p_goal.copy(),
             "hit_rects": hit_rects,
-            "equation": eq_new
+            "weight": myblue_line["weight"] + calculateDistance(p_start.copy(), p_goal.copy())
         })
-        continue   # this vline ends here, we don't need to move forward.
+
+        goal.append({
+            "p1_before": np.vstack([p1_before.copy(),p_goal.copy()]),
+            "p1": p_start.copy(),
+            "p2": p_goal.copy(),
+            "p2_goal": p_goal.copy(),
+            "hit_rects": hit_rects,
+            "weight": myblue_line["weight"] + calculateDistance(p_start.copy(), p_goal.copy())
+        })
+
+        return valid_lines2,goal  # this vline ends here, we don't need to move forward.
 
     # --- 3) Yoksa: tekrar corner'lara kır --- and select from the corner's of hit_rects
     for rect in hit_rects:
@@ -322,84 +334,209 @@ for vline in valid_lines:
             if intersects_any:
                 continue
 
-            eq_new = line_mb(p_start, corner)
-
             valid_lines2.append({
-                "p1_before": p1_before.copy(),
+                "p1_before": np.vstack([p1_before.copy(),corner.copy()]),
                 "p1": p_start.copy(),
                 "p2": corner.copy(),
                 "p2_goal": p_goal.copy(),
                 "hit_rects": hit_rects,
-                "equation": eq_new
+                "weight": myblue_line["weight"] + calculateDistance(p_start.copy(), corner.copy())
+
             })
 
+    valid_lines2 = [line for line in valid_lines2 if not any(np.allclose(line["p2"], v) for v in visited)] # visited olanlari valid_lines2den cikariyor.
+    #for line in valid_lines2: # yeni visited olanlari visited listesine sok
+    #    visited.append(line["p2"])
+    visited_brother = visited.copy()
+    valid_lines3 = []
+    for line in valid_lines2:
+        visited_brother.append(line["p2"])
+        dummy_validlines3 = gotoCorner2(visited_brother,line, goal)
+        if dummy_validlines3: # if bos kume -- do not append. this is for avoiding visited ends.
+            valid_lines3.append(dummy_validlines3[0])
 
-# FINDING THE KEY PAIR IN LINE_STORE2
-# target_p1 = np.array([25, -40.])
-# target_p2 = np.array([7., 30.])
-
-# found = False
-
-# for key, data in line_store2.items():
-#     if np.allclose(data["p1"], target_p1) and np.allclose(data["p2"], target_p2):
-#         print("FOUND line_store2 entry for (-40,-40) -> (15,-2)")
-#         print("key:", key)
-#         print("p1:", data["p1"])
-#         print("p2:", data["p2"])
-#         print("hit_rects:", data["hit_rects"])
-#         found = True
-#         break
-
-# if not found:
-#     print("This line is NOT in line_store2")
+    return valid_lines3, goal
 
 
+def gotoCorner3(visited, myblue_line, goal):
+    valid_lines2 = []
+    myblue_line = check_rectHit(myblue_line) # check for intersection
+    p_start = myblue_line["p1"]       
+    p_goal  = myblue_line["p2_goal"]  # goal
+    p1_before = myblue_line["p1_before"] # actual start of green lines
+    hit_rects = myblue_line["hit_rects"] # intersected rectangles
 
-target_p1 = np.array([25., -40.])
-target_p2_goal = np.array([7., 30.])
-matches = []
+    if hit_rects == 0: # if there is no intersection, we don't take further action.
+        valid_lines2.append({
+        "p1_before": np.vstack([p1_before.copy(),p_goal.copy()]),
+        "p1": p_start.copy(),
+        "p2": p_goal.copy(),
+        "p2_goal": p_goal.copy(),
+        "hit_rects": hit_rects,
+        "weight": myblue_line["weight"] + calculateDistance(p_start.copy(), p_goal.copy())
+        })
 
-for idx, line in enumerate(valid_lines):
-    if np.allclose(line["p1"], target_p1) and np.allclose(line["p2_goal"], target_p2_goal):
-        matches.append((idx, line))
+        goal.append({
+            "p1_before": np.vstack([p1_before.copy(),p_goal.copy()]),
+            "p1": p_start.copy(),
+            "p2": p_goal.copy(),
+            "p2_goal": p_goal.copy(),
+            "hit_rects": hit_rects,
+            "weight": myblue_line["weight"] + calculateDistance(p_start.copy(), p_goal.copy())
+        })
 
-if matches:
-    print(f"FOUND {len(matches)} matching entries\n")
-    for idx, line in matches:
-        print("index:", idx)
-        print("p1:", line["p1"])
-        print("p2:", line["p2"])
-        print("p2_goal:", line["p2_goal"])
-        print("hit_rects:", line["hit_rects"])
-        print("-" * 40)
-else:
-    print("This (p1, p2_goal) pair is NOT in valid_lines")
+        return valid_lines2, goal  # this vline ends here, we don't need to move forward.
+        
+    if len(hit_rects) == 1:
+        chosen_rect = hit_rects[0]
+    else:
+        dmin = float("inf")
+        chosen_rect = None
+        for rect in hit_rects:
+            c = np.array(rectangle_corners_center(rect)[4])
+            d = np.linalg.norm(c - p1)   # distance between two points
+            if d < dmin:
+                dmin = d
+                chosen_rect = rect       # this is the rectangle closest to p1
+
+    idx = rect_obstacles.index(chosen_rect)
+    chosen_expanded = expanded_rects[idx]
+    corners = rectangle_corners_center(chosen_expanded)[:-1]  # remove the center
+    candidate_lines = []
+    for corner in corners:
+        candidate_lines.append({
+            "p1": np.array(p1),
+            "p2": np.array(corner), # update the corner
+            "p2_goal": np.array(p2),
+            "hit_rects": hit_rects,
+            "weight": myblue_line["weight"] + calculateDistance(p1,corner),
+            "p1_before": np.vstack([np.array(p1),np.array(corner)])
+
+        })
+
+    for line in candidate_lines:
+        p1_line = np.array(line["p1"])
+        p2_line = np.array(line["p2"])
+
+        enters_expanded = False
+        for t in np.linspace(0, 1, 50, endpoint = False)[1:]:
+            p = p1_line + t * (p2_line - p1_line)
+            if point_in_rect(p, chosen_expanded):
+                enters_expanded = True
+                break
+
+        # if it does not enter the expanded rectangle
+        if not enters_expanded:
+            valid_lines2.append(line)
+
+    valid_lines2 = [line for line in valid_lines2 if not any(np.allclose(line["p2"], v) for v in visited)] # visited olanlari valid_lines2den cikariyor.
+    visited_brother = visited.copy()
+    valid_lines3 = []
+    for line in valid_lines2:
+        visited_brother.append(line["p2"])
+        dummy_validlines3 = gotoCorner2(visited_brother,line, goal)
+        if dummy_validlines3: # if bos kume -- do not append. this is for avoiding visited ends.
+            valid_lines3.append(dummy_validlines3[0])
+
+    return valid_lines3, goal
+  
+
+
+def calculateDistance(a,b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.linalg.norm(a - b)   
+
+# store lines between waypoints, start and goal
+'''
+line_store = {}
+
+p1 = (-40.0, -40.0)
+p2 = (-30.0, -35.0)
+eq = line_mb(p1, p2)
+weight = 0
+
+line_store[(0, 0)] = {
+    "p1": p1,
+    "p2": p2,
+    "eq": eq,
+    "weight": weight
+}
+
+processedLine = check_rectHit(line_store[(0, 0)])
+processedLine = gotoCorner(processedLine)
+
+goal = []
+valid_lines2 = []
+for vline in processedLine:
+    try:
+        visited = [vline["p2"]]
+        valid_lines2.append(gotoCorner2(visited, vline, goal)[0])
+    except Exception as e:
+        vline = processedLine
+        visited = [vline["p2"]]
+        valid_lines2.append(gotoCorner2(visited, vline, goal)[0])
+        break
 
 
 
-target_p1_before = np.array([25., -40.])
-target_p2_goal   = np.array([7., 30.])
+######%%%%%%%%%%%%%%%%%%%%%################
+weight_list = []
+for itemm in goal:
+    weight_list.append(itemm["weight"])
 
-matches2 = []
+min_weight = min(weight_list)
+'''
 
-for idx, line in enumerate(valid_lines2):
-    if np.allclose(line["p1_before"], target_p1_before) and \
-       np.allclose(line["p2_goal"], target_p2_goal):
-        matches2.append((idx, line))
 
-if matches2:
-    print(f"FOUND {len(matches2)} matching entries in valid_lines2\n")
-    for idx, line in matches2:
-        print("index:", idx)
-        print("p1_before:", line["p1_before"])
-        print("p1:", line["p1"])
-        print("p2:", line["p2"])
-        print("p2_goal:", line["p2_goal"])
-        print("hit_rects:", line["hit_rects"])
-        print("-" * 40)
-else:
-    print("This (p1_before, p2_goal) pair is NOT in valid_lines2")
+nodes = []
 
+nodes.append(tuple(q))              # start
+nodes.extend([tuple(w) for w in waypoints])
+nodes.append(tuple(q_goal))          # goal
+
+
+line_store = {}
+idx = 0
+
+traveller_sm = np.empty((7,7))
+
+for i, p1 in enumerate(nodes):
+    for j, p2 in enumerate(nodes):
+        if i == j:
+            continue
+
+        eq = line_mb(p1, p2)
+        weight = 0
+
+        line_store = {
+            "p1": p1,
+            "p2": p2,
+            "eq": eq,
+            "weight": weight
+        }
+        processedLine = check_rectHit(line_store)
+        #processedLine = check_rectHit(processedLine)
+        processedLine = gotoCorner3(processedLine)
+
+        goal = []
+        valid_lines2 = []
+        for vline in processedLine:
+            try:
+                visited = [vline["p2"]]
+                valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
+            except Exception as e:
+                vline = processedLine
+                visited = [vline["p2"]]
+                valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
+                break
+
+        weight_list = []
+        for itemm in goal:
+            weight_list.append(itemm["weight"])
+
+        min_weight = min(weight_list)
+        traveller_sm[i,j] = min_weight
 
 
 
@@ -483,23 +620,10 @@ for i in range(n):
             ax.plot(x_vals, y_vals, color='#ff1493', linewidth=1.2, alpha=0.9)  # hot pink
 
  # engeli dolanan iyi adaylar
-# for line in valid_lines:
-#     x_vals = [line["p1"][0], line["p2"][0]]
-#     y_vals = [line["p1"][1], line["p2"][1]]
-#     ax.plot(x_vals, y_vals, color='blue', linewidth=3.0, alpha=1.0)
-
-# ikinci adımda üretilen line'lar
-# for line in valid_lines2:
-#     x_vals = [line["p1"][0], line["p2"][0]]
-#     y_vals = [line["p1"][1], line["p2"][1]]
-
-#     ax.plot(
-#         x_vals,
-#         y_vals,
-#         color="orange",
-#         linewidth=3.0,
-#         alpha=1.0
-#     )
+for line in valid_lines:
+    x_vals = [line["p1"][0], line["p2"][0]]
+    y_vals = [line["p1"][1], line["p2"][1]]
+    ax.plot(x_vals, y_vals, color='blue', linewidth=3.0, alpha=1.0)
 
 
 for idx, line in matches:
@@ -524,5 +648,7 @@ for idx, line in matches2:
 
 ax.legend()
 plt.show()
+
+
 
 

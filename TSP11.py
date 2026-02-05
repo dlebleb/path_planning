@@ -379,10 +379,10 @@ for i, p1 in enumerate(nodes):
         # route'u kaydet
         route_sm[i, j] = best_item["p1_before"]
 
+# ===== TSP solved with PSO =====
 
-
+import random
 import numpy as np
-from itertools import combinations
 
 N = len(nodes)
 START = 0
@@ -391,73 +391,86 @@ END = N - 1
 # visit edilmesi gereken waypoint indexleri
 WAYPOINTS = [i for i in range(N) if i not in (START, END)]
 
-dp = {}
-parent = {}
+def random_path(START, END, WAYPOINTS):
+    mid = WAYPOINTS[:]
+    random.shuffle(mid)
+    return [START] + mid + [END]
 
-for j in WAYPOINTS:
-    mask = 1 << WAYPOINTS.index(j)
-    dp[(mask, j)] = traveller_sm[START, j]
-    parent[(mask, j)] = START
+def fitness(path, traveller_sm):
+    return sum(traveller_sm[a, b] for a, b in zip(path[:-1], path[1:]))
 
+def get_swaps(p1, p2):
+    swaps = []
+    temp = p1[:]
+    for i in range(1, len(p1)-1):
+        if temp[i] != p2[i]:
+            j = temp.index(p2[i])
+            swaps.append((i, j))
+            temp[i], temp[j] = temp[j], temp[i]
+    return swaps
 
-for r in range(2, len(WAYPOINTS) + 1):
-    for subset in combinations(WAYPOINTS, r):
+def apply_swaps(path, swaps, prob=0.5):
+    new = path[:]
+    for i, j in swaps:
+        if random.random() < prob:
+            new[i], new[j] = new[j], new[i]
+    return new
 
-        mask = 0
-        for s in subset:
-            mask |= 1 << WAYPOINTS.index(s)
+def PSO_TSP(traveller_sm, START, END, WAYPOINTS,
+            n_particles=30, n_iter=200,
+            w=0.4, c1=1.5, c2=1.5):
 
-        for j in subset:
-            prev_mask = mask ^ (1 << WAYPOINTS.index(j))
+    # 1️⃣ Başlangıç popülasyonu
+    particles = [random_path(START, END, WAYPOINTS) for _ in range(n_particles)]
 
-            best_cost = np.inf
-            best_prev = None
+    # personal best
+    pbest = particles[:]
+    pbest_cost = [fitness(p, traveller_sm) for p in particles]
 
-            for k in subset:
-                if k == j:
-                    continue
+    # global best
+    gbest_idx = np.argmin(pbest_cost)
+    gbest = pbest[gbest_idx][:]
+    gbest_cost = pbest_cost[gbest_idx]
 
-                cost = dp[(prev_mask, k)] + traveller_sm[k, j]
-                if cost < best_cost:
-                    best_cost = cost
-                    best_prev = k
+    # 2️⃣ Iterasyonlar
+    for it in range(n_iter):
+        for i in range(n_particles):
 
-            dp[(mask, j)] = best_cost
-            parent[(mask, j)] = best_prev
+            # --- velocity (swap farkları) ---
+            v_pbest = get_swaps(particles[i], pbest[i])
+            v_gbest = get_swaps(particles[i], gbest)
 
+            # --- yeni pozisyon ---
+            new_path = apply_swaps(particles[i], v_pbest, c1)
+            new_path = apply_swaps(new_path, v_gbest, c2)
 
+            particles[i] = new_path
 
-FULL_MASK = (1 << len(WAYPOINTS)) - 1
+            # --- fitness ---
+            cost = fitness(new_path, traveller_sm)
 
-best_cost = np.inf
-last_node = None
+            # personal best güncelle
+            if cost < pbest_cost[i]:
+                pbest[i] = new_path
+                pbest_cost[i] = cost
 
-for j in WAYPOINTS:
-    cost = dp[(FULL_MASK, j)] + traveller_sm[j, END]
-    if cost < best_cost:
-        best_cost = cost
-        last_node = j
+                # global best güncelle
+                if cost < gbest_cost:
+                    gbest = new_path
+                    gbest_cost = cost
 
-path = [END, last_node]
+        if it % 20 == 0:
+            print(f"Iter {it:3d} | Best cost: {gbest_cost:.3f}")
 
-mask = FULL_MASK
-curr = last_node
+    return gbest, gbest_cost
 
-while curr != START:
-    prev = parent[(mask, curr)]
-    path.append(prev)
+best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=80, n_iter=300)
 
-    if prev != START:
-        mask ^= 1 << WAYPOINTS.index(curr)
-
-    curr = prev
-
-path = path[::-1]
-
+print("\nPSO RESULT")
 print("Best cost:", best_cost)
-print("Best path (indices):", path)
-print("Best path (coordinates):")
-for idx in path:
+print("Best path:", best_path)
+print("Coordinates:")
+for idx in best_path:
     print(nodes[idx])
 
 
@@ -465,7 +478,7 @@ for idx in path:
 
 full_geometric_path = []
 
-for a1, b1 in zip(path[:-1], path[1:]):
+for a1, b1 in zip(best_path[:-1], best_path[1:]):
     segment = route_sm[a1, b1]
 
     if segment is None or len(segment) == 0:
@@ -564,11 +577,6 @@ ax.plot(
 
 ax.legend()
 plt.show()
-
-
-
-
-
 
 
 # ===============================

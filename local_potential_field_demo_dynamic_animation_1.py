@@ -13,7 +13,7 @@ import matplotlib.animation as animation
 # ===============================
 # INITIAL SETUP
 # ===============================
-q_goal = np.array([10, 10])
+q_goal = np.array([20, 10]) #[10, 10]
 q = np.array([-40.0, -40.0])
 v_robot = 25
 
@@ -51,6 +51,28 @@ b_base = b0 * sizes
 
 a_max = 7
 b_max = 5
+
+# ===============================
+# TSP FUNCTIONS
+# ===============================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ===============================
 # FORCE FUNCTIONS
@@ -137,35 +159,6 @@ def total_force(q, q_goal, obstacles_noisy, obstacle_speeds):
     F_att = attractive_force(q, q_goal)
     F_rep = repulsive_force(q, obstacles_noisy, obstacle_speeds)
     return F_att + F_rep
-
-# def resolve_obstacle_collisions(obstacles_true, obstacle_speeds):
-#     N = len(obstacles_true)
-
-#     # --- compute dynamic radii ---
-#     radii = np.zeros(N)
-#     for i in range(N):
-#         vx, vy = obstacle_speeds[i]
-#         vmag = np.sqrt(vx**2 + vy**2)
-
-#         a_i = a_base[i] + alpha * vmag
-#         b_i = b_base[i] + beta  * vmag
-
-#         # realistic effective radius = max(axis lengths)
-#         radii[i] = max(a_i, b_i)
-
-#     # --- pairwise collision check ---
-#     for i in range(N):
-#         for j in range(i+1, N):
-
-#             difference = obstacles_true[i] - obstacles_true[j]
-#             distance = np.linalg.norm(difference)
-#             allowed_distance = radii[i] + radii[j]
-
-#             if distance < allowed_distance and distance > 1e-9:  # collision
-#                 penetration = allowed_distance - distance
-#                 direction = difference / distance  # normalized
-#                 obstacles_true[i] += direction * (penetration / 2)
-#                 obstacles_true[j] -= direction * (penetration / 2)
 
 def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
                               magnitude_sigma=0.05, turn_sigma=0.02):
@@ -330,13 +323,18 @@ tolerance = 1
 # ===============================
 # UPDATE FUNCTION
 # ===============================
-
+time = int(0)
 def update(frame):
     global q
     global obstacle_speeds
     global ani
+    global time
+    time += 1
 
-    # 0) random maneuver (new speeds)
+    if (time == 100): ## path is updated every 1s.
+        q_goal = tsp()
+
+        # 0) random maneuver (new speeds)
     obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
 
     # --- 1) Move obstacles ---
@@ -361,7 +359,7 @@ def update(frame):
 
     # --- STOP CONDITION: close enough to goal ---
     if np.linalg.norm(q - q_goal) < tolerance:
-        print(f"Reached goal at frame {frame}")
+        print(f"Reached goal at time {time/100}")
         ani.event_source.stop()
         return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot
 
@@ -409,6 +407,7 @@ def update(frame):
         ax.add_patch(ellipse)
         ellipse_patches.append(ellipse)
 
+    print(f"Time: {time/100} s.")
     return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot
 
 

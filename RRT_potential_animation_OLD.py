@@ -27,9 +27,9 @@ from rrt_planner import RRTPlanner
 # ===============================
 # INITIAL SETUP
 # ===============================
-q_goal = np.array([5, 0])
+q_goal = np.array([10, 12])
 q = np.array([-40.0, -40.0])
-v_robot = 10
+v_robot = 12
 
 obstacles_true = np.array([[-18.0,-10.0], [18,-20], [18, 8], [22,26], [23,15], [-23,15], [5,5]])
 sigma = 0.1
@@ -46,6 +46,8 @@ alpha, beta = 0.2, 0.1
 sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1])
 a_base = a0 + sizes
 b_base = b0 + sizes
+a_max = 7
+b_max = 5
 
 # ===============================
 # FORCE FUNCTIONS
@@ -61,6 +63,8 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
         vmag = np.sqrt(vx**2 + vy**2)
         a = a_base[i] + alpha * vmag
         b = b_base[i] + beta * vmag
+        a_max = 7
+        b_max = 5
         obs_x, obs_y = obs[0], obs[1]
         eps = 1e-12
         q_x, q_y = (q[0]-obs_x)/(a+eps), (q[1]-obs_y)/(b+eps)
@@ -88,6 +92,8 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
         vmag = np.sqrt(vx**2 + vy**2)
         a = a_base[i] + alpha * vmag
         b = b_base[i] + beta * vmag
+        a_max = 7
+        b_max = 5
         obs_x, obs_y = obs[0], obs[1]
         eps = 1e-12
         q_x, q_y = (q[0]-obs_x)/(a+eps), (q[1]-obs_y)/(b+eps)
@@ -122,6 +128,8 @@ def min_clearance(q, obstacles_noisy, obstacle_speeds):
         vmag = np.sqrt(vx**2 + vy**2)
         a = a_base[i] + alpha * vmag
         b = b_base[i] + beta * vmag
+        a_max = 7
+        b_max = 5
         obs_x, obs_y = obs[0], obs[1]
         eps = 1e-12
         q_x = (q[0] - obs_x) / (a + eps)
@@ -137,6 +145,8 @@ def is_collision_check(q, obstacles_noisy, obstacle_speeds):
         vmag = np.sqrt(vx**2 + vy**2)
         a = a_base[i] + alpha * vmag
         b = b_base[i] + beta * vmag
+        a_max = 7
+        b_max = 5
         obs_x, obs_y = obs[0], obs[1]
         eps = 1e-12
         q_x, q_y = (q[0]-obs_x)/(a+eps), (q[1]-obs_y)/(b+eps)
@@ -156,6 +166,8 @@ def convert_obstacles_for_rrt(obstacles_true, obstacle_speeds, safety_margin: fl
         vmag = np.sqrt(vx**2 + vy**2)
         a = a_base[i] + alpha * vmag
         b = b_base[i] + beta * vmag
+        a_max = 7
+        b_max = 5
         radius = max(a, b) + safety_margin
         obstacles_rrt.append(Obstacle(Point(obs_pos[0], obs_pos[1]), radius))
     return obstacles_rrt
@@ -303,6 +315,8 @@ def update(frame):
         theta = np.degrees(np.arctan2(vy, vx))
         a = a_base[i] + alpha * vmag
         b = b_base[i] + beta * vmag
+        a_max = 7
+        b_max = 5
         ell = Ellipse(xy=(obs[0], obs[1]), width=2*a, height=2*b, angle=theta,
                       edgecolor='black', facecolor='cyan', alpha=0.15, linestyle='--', linewidth=1.2, zorder=1)
         ax.add_patch(ell)

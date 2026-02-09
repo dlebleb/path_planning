@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import math
+import random
+
 
 # Start & Goal
 q = np.array([-40.0, -40.0])
@@ -313,80 +315,85 @@ def calculateDistance(a,b):
     b = np.array(b)
     return np.linalg.norm(a - b)   
 
-nodes = []
+def bestPath(waypoints,q,q_goal):
 
-nodes.append(tuple(q))              # start
-nodes.extend([tuple(w) for w in waypoints])
-nodes.append(tuple(q_goal))          # goal
+    nodes = []
+
+    nodes.append(tuple(q))              # start
+    nodes.extend([tuple(w) for w in waypoints])
+    nodes.append(tuple(q_goal))          # goal
+    N = len(nodes)
+
+    line_store = {}
+    traveller_sm = np.empty((N,N))
+    route_sm = np.empty((N,N), dtype=object)
 
 
-line_store = {}
-idx = 0
+    for i, p1 in enumerate(nodes):
+        for j, p2 in enumerate(nodes):
+            if i == j:
+                continue
 
-traveller_sm = np.empty((7,7))
-route_sm = np.empty((7,7), dtype=object)
+            eq = line_mb(p1, p2)
+            weight = 0
 
+            line_store = {
+                "p1": p1, # iteration's starting point
+                "p2": p1, # iteration's current point
+                "equation": eq,
+                "p1_before" : p1,
+                "weight": weight,
+                "p2_goal": p2,
+                "hit_rects": 0
+            }
+            
 
-for i, p1 in enumerate(nodes):
-    for j, p2 in enumerate(nodes):
-        if i == j:
-            continue
+            visited = []
+            goal = []
+            valid_lines2 = []
+            for vline in line_store:
+                try:
+                    visited = [vline["p2"]]
+                    valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
+                except Exception as e:
+                    vline = line_store
+                    visited = [vline["p2"]]
+                    valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
+                    break
 
-        eq = line_mb(p1, p2)
-        weight = 0
+            weight_list = []
+            for itemm in goal:
+                weight_list.append(itemm["weight"])
 
-        line_store = {
-            "p1": p1, # iteration's starting point
-            "p2": p1, # iteration's current point
-            "equation": eq,
-            "p1_before" : p1,
-            "weight": weight,
-            "p2_goal": p2,
-            "hit_rects": 0
-        }
-        
+            min_weight = min(weight_list)
+            traveller_sm[i,j] = min_weight
+            
+            # min weight
+            best_item = None
+            for item in goal:
+                if item["weight"] == min_weight:
+                    best_item = item
+                    break
 
-        visited = []
-        goal = []
-        valid_lines2 = []
-        for vline in line_store:
-            try:
-                visited = [vline["p2"]]
-                valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
-            except Exception as e:
-                vline = line_store
-                visited = [vline["p2"]]
-                valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
-                break
-
-        weight_list = []
-        for itemm in goal:
-            weight_list.append(itemm["weight"])
-
-        min_weight = min(weight_list)
-        traveller_sm[i,j] = min_weight
-        
-        # min weight
-        best_item = None
-        for item in goal:
-            if item["weight"] == min_weight:
-                best_item = item
-                break
-
-        # route'u kaydet
-        route_sm[i, j] = best_item["p1_before"]
+            # route'u kaydet
+            route_sm[i, j] = best_item["p1_before"]
+    return traveller_sm, route_sm
 
 # ===== TSP solved with PSO =====
 
-import random
-import numpy as np
+traveller_sm, route_sm = bestPath(waypoints, q, q_goal)
 
-N = len(nodes)
-START = 0
-END = N - 1
+def build_tsp_indices(q, q_goal, waypoints):
+    nodes = [tuple(q)]
+    nodes.extend([tuple(w) for w in waypoints])
+    nodes.append(tuple(q_goal))
+    N = len(nodes)
+    START = 0
+    END = N - 1
+    WAYPOINTS = [i for i in range(N) if i not in (START, END)] # visit edilmesi gereken waypoint indexleri
+    return N, START, END, WAYPOINTS, nodes
 
-# visit edilmesi gereken waypoint indexleri
-WAYPOINTS = [i for i in range(N) if i not in (START, END)]
+N, START, END, WAYPOINTS, nodes = build_tsp_indices(q, q_goal, waypoints)
 
 def random_path(START, END, WAYPOINTS):
     mid = WAYPOINTS[:]
@@ -456,12 +463,13 @@ def PSO_TSP(traveller_sm, START, END, WAYPOINTS,
                     gbest = new_path
                     gbest_cost = cost
 
-        if it % 20 == 0:
-            print(f"Iter {it:3d} | Best cost: {gbest_cost:.3f}")
+        #if it % 20 == 0:
+            #print(f"Iter {it:3d} | Best cost: {gbest_cost:.3f}")
 
     return gbest, gbest_cost
 
-best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=80, n_iter=300)
+best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
+
 
 print("\nPSO RESULT")
 print("Best cost:", best_cost)
@@ -470,29 +478,30 @@ print("Coordinates:")
 for idx in best_path:
     print(nodes[idx])
 
-
 # ===== ASIL YOL: route_sm'den gerçek geometrik path =====
 
-full_geometric_path = []
+def build_full_geometric_path(best_path, route_sm):
+    """
+    Reconstructs the full geometric path from PSO output indices.
+    """
 
-for a1, b1 in zip(best_path[:-1], best_path[1:]):
-    segment = route_sm[a1, b1]
+    full_geometric_path = []
 
-    if segment is None or len(segment) == 0:
-        print(f"WARNING: no geometric route from {a1} to {b1}")
-        continue
+    for a1, b1 in zip(best_path[:-1], best_path[1:]):
+        segment = route_sm[a1, b1]
 
-    # ilk segmentte tümünü ekle
-    if len(full_geometric_path) == 0:
-        full_geometric_path.extend(segment)
-    else:
-        # tekrar eden noktayı (segment[0]) ekleme
-        full_geometric_path.extend(segment[1:])
+        if segment is None or len(segment) == 0:
+            # sessizce geç veya istersen warning ver
+            continue
+        # ilk segmentte tümünü ekle
+        if len(full_geometric_path) == 0:
+            full_geometric_path.extend(segment)
+        else:
+            # tekrar eden noktayı ekleme
+            full_geometric_path.extend(segment[1:])
 
-
-print("\nFULL GEOMETRIC PATH (route_sm):")
-for p in full_geometric_path:
-    print(p)
+    return np.array(full_geometric_path)
+full_geometric_path = build_full_geometric_path(best_path,route_sm)
 
 # ===============================
 # PLOTTING

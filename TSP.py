@@ -1,87 +1,19 @@
 """""
 Global planning with TSP
+functions:
 """""
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import math
-
-# Start & Goal
-q = np.array([-40.0, -40.0])
-q_goal = np.array([10.0, 12.0])
-
-# humans modeled as elliptical obstacles
-obstacles_true = np.array([
-    [-18.0,-10.0], [18,-20], [18, 8], [22,26], [25,15], [-23,15], [5,5]
-])
-sigma = 0.1
-obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
-
-# elliptical obstacle speeds
-obstacle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]])
-obstacle_speeds = obstacle_speeds * 80
-
-# elliptical obstacle dimensions
-a0 = 2.0 # major axis (along velocity direction)
-b0 = 1.0 # minor axis (perpendicular to velocity direction)
-alpha = 0.2   # major scaling (large)
-beta  = 0.1   # minor scaling (small)
-
-# each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1])
-# incorporate static size
-a_base = a0 + sizes 
-b_base = b0 + sizes
-
-a = np.zeros(obstacles_true.shape[0])
-b = np.zeros(obstacles_true.shape[0])
-theta = np.zeros(obstacles_true.shape[0])
-
-for i, obs in enumerate(obstacle_speeds):
-    vx, vy = obs
-    vmag = np.sqrt(vx**2 + vy**2) 
-    theta[i] = np.degrees(np.arctan2(vy, vx))
-    a[i] = a_base[i] + alpha * vmag # major axis (velocity direction)
-    b[i] = b_base[i] + beta  * vmag # minor axis (perpendicular)
-
-# rectangular large obstacles
-# x_min, y_min, width (m), height (m)
-rect_obstacles = [
-    [-40, -30, 12, 3],   # truck: narrow and long
-    [20, -35, 6, 3],     # van / minibus
-    [-45, 15, 10, 4],    # large vehicle
-    [5, 25, 3, 2],       # bicycle / small vehicle
-    [-6, -6.5, 12, 3],   # truck
-    [-13.5, -23.0, 12, 6] 
-]
-
-expanded_rects = []
-for x, y, w, h in rect_obstacles:
-    new_x = x - 1
-    new_y = y - 1
-    new_w = w + 2
-    new_h = h + 2
-    expanded_rects.append([new_x, new_y, new_w, new_h])
-
-eps_expanded_rects = []
-for x, y, w, h in rect_obstacles:
-    new_x = x - 1 + 0.001
-    new_y = y - 1 + 0.001
-    new_w = w + 2 - 2*0.001
-    new_h = h + 2 - 2*0.001
-    eps_expanded_rects.append([new_x, new_y, new_w, new_h])
-
-
-# Stations to stop at (post office, hospital, grocery store, home, cafe)
-waypoints = np.array([
-    [-30, -35],  
-    [25, -40],   
-    [-48, 20],   
-    [7, 30],      
-    [15, -2],     
-])
+import random
 
 def rectangle_corners_center(rect):
+    '''function definition:
+    inputs-->
+    rect: sdfkljhadsfkjsdhflj
+    outputs -->
+    dalkjshdaksjhdkajs'''
     x, y, w, h = rect
     return [
         (x, y),         # left-bottom
@@ -150,7 +82,7 @@ def point_in_rect(pt, rect):
     x, y, w, h = rect
     return (x <= X <= x + w) and (y <= Y <= y + h)
 
-def check_rectHit(line_store): # checks whether a line intersects with rectangle, and store intersected lines in line_store2
+def check_rectHit(line_store,rect_obstacles, expanded_rects): # checks whether a line intersects with rectangle, and store intersected lines in line_store2
 
 
     # p1 : previous point
@@ -211,7 +143,7 @@ def check_rectHit(line_store): # checks whether a line intersects with rectangle
         } ## condition if there is no obstacle along the way
     return line_store_hit
 
-def gotoCorner3(visited, myblue_line, goal):
+def gotoCorner3(visited, myblue_line, goal, rect_obstacles, expanded_rects, eps_expanded_rects):
 
     # we will move 1 step forward.
 
@@ -222,7 +154,7 @@ def gotoCorner3(visited, myblue_line, goal):
     # hit_rects: rectangles that we hit
     # 
 
-    myblue_line = check_rectHit(myblue_line) # check for intersection
+    myblue_line = check_rectHit(myblue_line,rect_obstacles, expanded_rects) # check for intersection
     valid_lines2= []
     p1          = myblue_line["p1"]  # previous point
     p2          = myblue_line["p2"]  # current point
@@ -302,7 +234,7 @@ def gotoCorner3(visited, myblue_line, goal):
     valid_lines3 = []
     for line in valid_lines2:
         visited_brother.append(line["p2"])
-        dummy_validlines3 = gotoCorner3(visited_brother,line, goal)
+        dummy_validlines3 = gotoCorner3(visited_brother,line, goal, rect_obstacles, expanded_rects, eps_expanded_rects)
         if dummy_validlines3: # if bos kume -- do not append. this is for avoiding visited ends.
             valid_lines3.append(dummy_validlines3[0])
 
@@ -313,80 +245,81 @@ def calculateDistance(a,b):
     b = np.array(b)
     return np.linalg.norm(a - b)   
 
-nodes = []
+def bestPath(waypoints,q,q_goal, rect_obstacles, expanded_rects, eps_expanded_rects):
 
-nodes.append(tuple(q))              # start
-nodes.extend([tuple(w) for w in waypoints])
-nodes.append(tuple(q_goal))          # goal
+    nodes = []
+
+    nodes.append(tuple(q))              # start
+    nodes.extend([tuple(w) for w in waypoints])
+    nodes.append(tuple(q_goal))          # goal
+    N = len(nodes)
+
+    line_store = {}
+    traveller_sm = np.empty((N,N))
+    route_sm = np.empty((N,N), dtype=object)
 
 
-line_store = {}
-idx = 0
+    for i, p1 in enumerate(nodes):
+        for j, p2 in enumerate(nodes):
+            if i == j:
+                continue
 
-traveller_sm = np.empty((7,7))
-route_sm = np.empty((7,7), dtype=object)
+            eq = line_mb(p1, p2)
+            weight = 0
 
+            line_store = {
+                "p1": p1, # iteration's starting point
+                "p2": p1, # iteration's current point
+                "equation": eq,
+                "p1_before" : p1,
+                "weight": weight,
+                "p2_goal": p2,
+                "hit_rects": 0
+            }
+            
 
-for i, p1 in enumerate(nodes):
-    for j, p2 in enumerate(nodes):
-        if i == j:
-            continue
+            visited = []
+            goal = []
+            valid_lines2 = []
+            for vline in line_store:
+                try:
+                    visited = [vline["p2"]]
+                    valid_lines2.append(gotoCorner3(visited, vline, goal, rect_obstacles, expanded_rects, eps_expanded_rects)[0])
+                except Exception as e:
+                    vline = line_store
+                    visited = [vline["p2"]]
+                    valid_lines2.append(gotoCorner3(visited, vline, goal, rect_obstacles, expanded_rects, eps_expanded_rects)[0])
+                    break
 
-        eq = line_mb(p1, p2)
-        weight = 0
+            weight_list = []
+            for itemm in goal:
+                weight_list.append(itemm["weight"])
 
-        line_store = {
-            "p1": p1, # iteration's starting point
-            "p2": p1, # iteration's current point
-            "equation": eq,
-            "p1_before" : p1,
-            "weight": weight,
-            "p2_goal": p2,
-            "hit_rects": 0
-        }
-        
+            min_weight = min(weight_list)
+            traveller_sm[i,j] = min_weight
+            
+            # min weight
+            best_item = None
+            for item in goal:
+                if item["weight"] == min_weight:
+                    best_item = item
+                    break
 
-        visited = []
-        goal = []
-        valid_lines2 = []
-        for vline in line_store:
-            try:
-                visited = [vline["p2"]]
-                valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
-            except Exception as e:
-                vline = line_store
-                visited = [vline["p2"]]
-                valid_lines2.append(gotoCorner3(visited, vline, goal)[0])
-                break
-
-        weight_list = []
-        for itemm in goal:
-            weight_list.append(itemm["weight"])
-
-        min_weight = min(weight_list)
-        traveller_sm[i,j] = min_weight
-        
-        # min weight
-        best_item = None
-        for item in goal:
-            if item["weight"] == min_weight:
-                best_item = item
-                break
-
-        # route'u kaydet
-        route_sm[i, j] = best_item["p1_before"]
+            # route'u kaydet
+            route_sm[i, j] = best_item["p1_before"]
+    return traveller_sm, route_sm
 
 # ===== TSP solved with PSO =====
 
-import random
-import numpy as np
-
-N = len(nodes)
-START = 0
-END = N - 1
-
-# visit edilmesi gereken waypoint indexleri
-WAYPOINTS = [i for i in range(N) if i not in (START, END)]
+def build_tsp_indices(q, q_goal, waypoints):
+    nodes = [tuple(q)]
+    nodes.extend([tuple(w) for w in waypoints])
+    nodes.append(tuple(q_goal))
+    N = len(nodes)
+    START = 0
+    END = N - 1
+    WAYPOINTS = [i for i in range(N) if i not in (START, END)] # visit edilmesi gereken waypoint indexleri
+    return N, START, END, WAYPOINTS, nodes
 
 def random_path(START, END, WAYPOINTS):
     mid = WAYPOINTS[:]
@@ -456,148 +389,33 @@ def PSO_TSP(traveller_sm, START, END, WAYPOINTS,
                     gbest = new_path
                     gbest_cost = cost
 
-        if it % 20 == 0:
-            print(f"Iter {it:3d} | Best cost: {gbest_cost:.3f}")
+        #if it % 20 == 0:
+            #print(f"Iter {it:3d} | Best cost: {gbest_cost:.3f}")
 
     return gbest, gbest_cost
 
-best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=80, n_iter=300)
-
-print("\nPSO RESULT")
-print("Best cost:", best_cost)
-print("Best path:", best_path)
-print("Coordinates:")
-for idx in best_path:
-    print(nodes[idx])
-
-
 # ===== ASIL YOL: route_sm'den gerçek geometrik path =====
 
-full_geometric_path = []
+def build_full_geometric_path(best_path, route_sm):
+    """
+    Reconstructs the full geometric path from PSO output indices.
+    """
 
-for a1, b1 in zip(best_path[:-1], best_path[1:]):
-    segment = route_sm[a1, b1]
+    full_geometric_path = []
 
-    if segment is None or len(segment) == 0:
-        print(f"WARNING: no geometric route from {a1} to {b1}")
-        continue
+    for a1, b1 in zip(best_path[:-1], best_path[1:]):
+        segment = route_sm[a1, b1]
 
-    # ilk segmentte tümünü ekle
-    if len(full_geometric_path) == 0:
-        full_geometric_path.extend(segment)
-    else:
-        # tekrar eden noktayı (segment[0]) ekleme
-        full_geometric_path.extend(segment[1:])
+        if segment is None or len(segment) == 0:
+            # sessizce geç veya istersen warning ver
+            continue
+        # ilk segmentte tümünü ekle
+        if len(full_geometric_path) == 0:
+            full_geometric_path.extend(segment)
+        else:
+            # tekrar eden noktayı ekleme
+            full_geometric_path.extend(segment[1:])
 
-
-print("\nFULL GEOMETRIC PATH (route_sm):")
-for p in full_geometric_path:
-    print(p)
-
-# ===============================
-# PLOTTING
-# ===============================
-
-fig, ax = plt.subplots(figsize=(6,6))
-ax.set_xlim(-50, 50)
-ax.set_ylim(-50, 50)
-ax.set_aspect('equal')
-ax.set_title("TSP")
-ax.set_xlabel("X (m)")
-ax.set_ylabel("Y (m)")
-ax.grid(True)
-
-# Start & Goal
-ax.plot(q[0], q[1], 'go', markersize=8, label="Start")
-ax.plot(q_goal[0], q_goal[1], 'ro', markersize=8, label="Goal")
-
-# Nokta engeller
-ax.scatter(obstacles_true[:,0], obstacles_true[:,1], marker='x', label="True obstacles")
-ax.scatter(obstacles_noisy[:,0], obstacles_noisy[:,1], marker='o', alpha=0.5, label="Noisy obstacles")
-
-# True obstacles as ellipses
-for i in range(obstacles_true.shape[0]):
-    x0, y0 = obstacles_true[i]
-    ell = Ellipse(
-        (x0, y0),               
-        width=2*a[i],
-        height=2*b[i],
-        angle=theta[i],
-        edgecolor='black',
-        facecolor='cyan',
-        alpha=0.15,       # şeffaflık
-        linestyle='--',
-        linewidth=1.2
-    )
-    ax.add_patch(ell)
-
-
-# Dikdörtgen engeller and the circle
-for x, y, w, h in rect_obstacles:
-    rect = plt.Rectangle((x, y), w, h, fill=False, linewidth=2)
-    ax.add_patch(rect)
-
-    # --- Circumcircle ---
-    cx = x + w/2
-    cy = y + h/2
-    r = np.sqrt((w/2)**2 + (h/2)**2)
-
-    circle = plt.Circle((cx, cy), r, fill=False, linestyle=':', linewidth=1.5)
-    ax.add_patch(circle)
-
-# Genişletilmiş rectangle'lar (buffered)
-for x, y, w, h in expanded_rects:
-    rect2 = plt.Rectangle((x, y), w, h, fill=False, linewidth=1.5,
-                           edgecolor='orange', linestyle='--')
-    ax.add_patch(rect2)
-
-# Waypointleri mor yıldız olarak çiz
-ax.scatter(waypoints[:,0], waypoints[:,1],
-           color='purple', marker='*', s=120, label="Uğranacak noktalar")
-
-
-# Full geometric path
-# ===============================
-# PLOT FOUND TSP PATH
-# ===============================
-path_arr = np.array(full_geometric_path)
-
-# Ana path (kalın çizgi)
-ax.plot(
-    path_arr[:, 0],
-    path_arr[:, 1],
-    color='red',
-    linewidth=3,
-    label="TSP path"
-)
-
-
-ax.legend()
-plt.show()
-
-
-# ===============================
-# PLOTTING
-# ===============================
-
-print("dxxx")
-
-plt.figure(figsize=(5, 4))
-im = plt.imshow(traveller_sm, cmap="viridis")
-
-# hücrelerin üstüne değer yaz
-for i in range(traveller_sm.shape[0]):
-    for j in range(traveller_sm.shape[1]):
-        plt.text(j, i, f"{traveller_sm[i, j]:.2f}",
-                 ha="center", va="center",
-                 color="white")
-
-plt.colorbar(im)
-plt.xlabel("Column index")
-plt.ylabel("Row index")
-plt.title("Matrix with values")
-
-plt.tight_layout()
-plt.show()
+    return np.array(full_geometric_path)
 
 

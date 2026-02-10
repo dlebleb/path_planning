@@ -80,7 +80,7 @@ q_goal                              = full_geometric_path[2]
 # RUN ANIMATION
 # ===============================
 stop_counter    = 0
-ani             = 0
+ani             = None
 goals_achieved_so_far = []
 mystates = {
     "q": q,

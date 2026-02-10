@@ -70,7 +70,7 @@ traveller_sm, route_sm              = bestPath(waypoints, q, q_goal_final, rect_
 N, START, END, WAYPOINTS, nodes     = build_tsp_indices(q, q_goal_final, waypoints)
 best_path, best_cost                = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
 full_geometric_path                 = build_full_geometric_path(best_path,route_sm)
-q_goal                              = full_geometric_path[3]
+q_goal                              = full_geometric_path[2]
 
 
 

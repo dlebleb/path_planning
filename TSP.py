@@ -414,7 +414,8 @@ def build_full_geometric_path(best_path, route_sm):
             full_geometric_path.extend(segment)
         else:
             # tekrar eden noktayı ekleme
-            full_geometric_path.extend(segment[1:])
+            #full_geometric_path.extend(segment[1:])
+            full_geometric_path.extend(segment[2:])
 
     return np.array(full_geometric_path)
 

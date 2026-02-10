@@ -408,7 +408,10 @@ def update(frame,mystates):
         goals_achieved_so_far.append(q_goal)
         stop_counter = stop_counter + 1 
         #q_goal = full_geometric_path[3+stop_counter]
-        q_goal = full_geometric_path[2+stop_counter]
+        if np.all(q_goal == q_goal_final):
+            pass
+        else:
+            q_goal = full_geometric_path[2+stop_counter]
 
     if np.linalg.norm(q - q_goal_final) < tolerance:
         print(f"Reached goal at time {time/100}")

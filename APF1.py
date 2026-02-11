@@ -70,6 +70,21 @@ def init_environment():
 
     return rect_obstacles, expanded_rects, eps_expanded_rects, waypoints
 
+def init_environment_waypoints():
+    """
+    Initializes waypoints.
+    """
+    # Waypoints (stations)
+    waypoints = np.array([
+        [-30, -35],
+        [25, -40],
+        [-48, 20],
+        [7, 30],
+        [15, -2],
+    ])
+
+    return waypoints
+
 # function for updating expanded rects from rect_obstacles
 def compute_expanded_rects(rect_obstacles, buffer=1.0):
     """
@@ -422,7 +437,8 @@ def update(frame,mystates):
     if (time % 1000 == 0): ## path is updated every 1s.
         #q_goal = tsp()
         # initialize the waypoints again 
-        rect_obstacles, expanded_rects, eps_expanded_rects, waypoints = init_environment()
+        #rect_obstacles, expanded_rects, eps_expanded_rects, waypoints = init_environment()
+        waypoints = init_environment_waypoints()
         
         # remove visited waypoints from the waypoint list
         waypoints = remove_visited_waypoints(waypoints,goals_achieved_so_far, tol = tolerance)

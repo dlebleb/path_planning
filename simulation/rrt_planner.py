@@ -69,7 +69,7 @@ class RRTPlanner:
     
     def _is_collision_free(self, point: Point, obstacles: List[Obstacle]) -> bool:
         """
-        Check if a point is not inside any obstacle.
+        Check if a point is not inside any obstacle. can not go into obstacles so it would avoid that point
         
         Args:
             point: Point to check
@@ -100,7 +100,7 @@ class RRTPlanner:
         """
         # Check multiple points along the path
         for i in range(10):
-            t = i / 10.0  # Interpolation parameter (0.0 to 1.0)
+            t = i / 10.0  # Interpolation parameter (0.0,0.1,0.2.... to 1.0 (reached p2))
             check_point = Point(
                 p1.x + t * (p2.x - p1.x),
                 p1.y + t * (p2.y - p1.y)

@@ -1,10 +1,10 @@
 """
-A* Path Planning Animation — same stops and world as TSP10.
+A* Path Planning Animation — same obstacle animation setup as main1.py.
 
 - A* algorithm: plans collision-free path from current position to current target (one of the stops or goal).
-- From TSP10 / main script: start, goal, stations (waypoints), elliptical/rectangular obstacles, speeds,
-  ellipse dimensions, drawing style. Robot visits the same 5 stations as TSP10 then goal.
-- Rectangles are drawn with circumcircle (circle border) as in TSP10 — no ellipse on rectangles.
+- Obstacles (from main1.py): 13 elliptical obstacles (positions, speeds, sizes), 6 moving rectangles with
+  expanded buffers recomputed each frame. Ellipse dimensions and drawing match main1/APF1.
+- Robot visits the same 5 stations then goal.
 """
 
 import os
@@ -12,7 +12,7 @@ import sys
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse, Rectangle, Circle
+from matplotlib.patches import Ellipse, Rectangle
 import matplotlib.animation as animation
 from typing import List, Optional, Tuple
 
@@ -27,31 +27,32 @@ q_goal  = np.array([10.0,  12.0], dtype=float)
 q = q_start.copy()
 v_robot = 24.0
 
-# From TSP10: elliptical obstacles
+# From main1.py: 13 elliptical obstacles (same positions, speeds, sizes as main1)
 obstacles_true = np.array([
-    [-18.0, -10.0], [18.0, -20.0], [18.0, 8.0], [22.0, 26.0],
-    [25.0,  15.0], [-23.0, 15.0], [5.0, 5.0]
+    [-18.0, -10.0], [18, -20], [18, 8], [22, 26], [23, 15], [-23, 15], [5, 5],
+    [-40, -30], [15, -10], [10, 5], [-30, 0], [-20, -20], [0, 0]
 ], dtype=float)
 sigma = 0.1
 obstacles_noisy = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
-obstacle_speeds = np.array(
-    [[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1],
-     [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1]],
-    dtype=float
-) * 80.0
+obstacle_speeds = np.array([
+    [-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1],
+    [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2]
+], dtype=float) * 80.0
+vmag_max, vmag_min = 24.5, 5.0
 
 dt = 0.01
 path_data = [q.copy()]
 
-# From TSP10: ellipse dimensions
+# From main1/APF1: ellipse dimensions (a_base = a0 * sizes, b_base = b0 * sizes)
 a0, b0 = 2.0, 1.0
 alpha, beta = 0.2, 0.1
-sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1])
-a_base = a0 + sizes
-b_base = b0 + sizes
+sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9])
+a_base = a0 * sizes
+b_base = b0 * sizes
+a_max, b_max = 7.0, 5.0
 
-# From TSP10: rectangular obstacles (x_min, y_min, width, height)
-rect_obstacles = [
+# From main1/APF1 init_environment(): rectangular obstacles (x_min, y_min, width, height); mutable for animation
+RECT_OBSTACLES_INIT = [
     [-40, -30, 12, 3],
     [20, -35, 6, 3],
     [-45, 15, 10, 4],
@@ -59,10 +60,12 @@ rect_obstacles = [
     [-6, -6.5, 12, 3],
     [-13.5, -23.0, 12, 6],
 ]
-# From TSP10: expanded rects (buffer 1) for A* obstacle list
-expanded_rects = []
-for x, y, w, h in rect_obstacles:
-    expanded_rects.append([x - 1, y - 1, w + 2, h + 2])
+rect_obstacles = [list(r) for r in RECT_OBSTACLES_INIT]
+# Rectangle speeds (main1: same scale 80); expanded_rects recomputed each frame in update()
+rectangle_speeds = np.array([
+    [-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1]
+], dtype=float) * 80.0
+expanded_rects = []  # filled each frame by compute_expanded_rects(rect_obstacles, buffer=1.0)
 
 # From TSP10: stations to stop at (post office, hospital, grocery store, home, cafe) — same exact stops
 STATIONS = np.array([
@@ -76,11 +79,8 @@ STATIONS = np.array([
 STOPS_LIST = [tuple(STATIONS[i]) for i in range(len(STATIONS))] + [(q_goal[0], q_goal[1])]
 
 # =============================================================================
-# A* AND ANIMATION PARAMETERS (not from TSP10)
+# A* AND ANIMATION PARAMETERS
 # =============================================================================
-MAX_OBSTACLE_SPEED = 12.0
-MIN_OBSTACLE_SPEED = 6.0
-MAX_ELLIPSE_AXIS = 8.0
 BOUNDS = (-50, 50, -50, 50)
 ASTAR_STEP = 0.5
 SAFETY_MARGIN = 0.5
@@ -94,19 +94,33 @@ current_waypoint_index = 0
 current_stop_index = 0   # 0..len(STOPS_LIST)-1; last stop is goal
 
 # ===============================
-# HELPERS (ellipse axes: from TSP10; obstacle list for A*: used by A* algorithm)
+# HELPERS (ellipse axes and obstacle list for A* — match main1/APF1)
 # ===============================
+def compute_expanded_rects(rect_obstacles, buffer=1.0):
+    """Recompute expanded rectangles from current rect positions (main1/APF1)."""
+    rect_obstacles = np.array(rect_obstacles)
+    expanded = np.zeros_like(rect_obstacles)
+    expanded[:, 0] = rect_obstacles[:, 0] - buffer
+    expanded[:, 1] = rect_obstacles[:, 1] - buffer
+    expanded[:, 2] = rect_obstacles[:, 2] + 2 * buffer
+    expanded[:, 3] = rect_obstacles[:, 3] + 2 * buffer
+    return expanded
+
 def get_obstacle_axes(i: int, vmag: float) -> Tuple[float, float]:
-    """From TSP10: ellipse axis lengths from speed."""
-    v = min(vmag, MAX_OBSTACLE_SPEED)
-    a = min(a_base[i] + alpha * v, MAX_ELLIPSE_AXIS)
-    b = min(b_base[i] + beta * v, MAX_ELLIPSE_AXIS)
+    """From main1/APF1: ellipse axis lengths from speed (a_base + alpha*vmag, clamped to a_max, b_max)."""
+    vmag = float(np.clip(vmag, vmag_min, vmag_max))
+    a = min(a_base[i] + alpha * vmag, a_max)
+    b = min(b_base[i] + beta * vmag, b_max)
     return float(a), float(b)
 
-def build_obstacles_for_astar(obstacles_pos: np.ndarray, obstacle_speeds_: np.ndarray) -> List[Tuple[float, float, float]]:
+def build_obstacles_for_astar(
+    obstacles_pos: np.ndarray,
+    obstacle_speeds_: np.ndarray,
+    expanded_rects_,
+) -> List[Tuple[float, float, float]]:
     """
     A* algorithm: build list of (x, y, radius) for collision checking.
-    Ellipses → circles; rectangles → circumcircles of expanded rects (same as TSP10 world).
+    Ellipses → circles; rectangles → circumcircles of expanded rects (current frame).
     """
     out: List[Tuple[float, float, float]] = []
     for i, obs_pos in enumerate(obstacles_pos):
@@ -115,10 +129,10 @@ def build_obstacles_for_astar(obstacles_pos: np.ndarray, obstacle_speeds_: np.nd
         a, b = get_obstacle_axes(i, vmag)
         r = max(a, b) + SAFETY_MARGIN
         out.append((float(obs_pos[0]), float(obs_pos[1]), float(r)))
-    for x, y, w, h in expanded_rects:
+    for x, y, w, h in expanded_rects_:
         cx = x + w / 2
         cy = y + h / 2
-        r = math.sqrt((w / 2) ** 2 + (h / 2) ** 2) + 0.5
+        r = math.sqrt((w / 2) ** 2 + (h / 2) ** 2) + SAFETY_MARGIN
         out.append((cx, cy, r))
     return out
 
@@ -126,46 +140,24 @@ def apply_stochastic_maneuver(
     obstacle_speeds_: np.ndarray,
     maneuver_prob: float = 0.25,
     magnitude_sigma: float = 0.05,
-    turn_sigma: float = 0.02
+    turn_sigma: float = 0.02,
 ) -> np.ndarray:
     """
-    Randomly perturbs obstacle velocity direction/magnitude to simulate stochastic motion.
-    Enforces min/max speed bounds.
+    Randomly perturbs velocity direction/magnitude (main1/APF1 style).
+    Enforces vmag_min and vmag_max (24.5, 5).
     """
-    new_speeds = obstacle_speeds_.copy()
+    new_speeds = np.array(obstacle_speeds_, dtype=float)
     for i in range(len(new_speeds)):
         vx, vy = new_speeds[i]
         vmag = float(np.hypot(vx, vy))
-
-        # Slight magnitude noise
-        vmag *= float(np.random.normal(1.0, magnitude_sigma))
-
-        # Slight turn noise
+        scale = np.clip(np.random.normal(1.0, magnitude_sigma), 0.85, 1.15)
+        vmag *= scale
+        vmag = np.clip(vmag, vmag_min, vmag_max)
         theta = float(np.arctan2(vy, vx) + np.random.normal(0.0, turn_sigma))
-
-        # Occasional stronger maneuver
         if np.random.rand() < maneuver_prob:
             theta += float(np.random.uniform(-np.pi / 2, np.pi / 2))
-
-        vx, vy = vmag * np.cos(theta), vmag * np.sin(theta)
-
-        # Clamp to max speed
-        vmag2 = float(np.hypot(vx, vy))
-        if vmag2 > MAX_OBSTACLE_SPEED:
-            f = MAX_OBSTACLE_SPEED / (vmag2 + 1e-12)
-            vx, vy = vx * f, vy * f
-            vmag2 = float(np.hypot(vx, vy))
-
-        # Enforce min speed (avoid near-zero)
-        if vmag2 < MIN_OBSTACLE_SPEED:
-            if vmag2 < 1e-6:
-                theta = float(np.random.uniform(0.0, 2 * np.pi))
-                vx = MIN_OBSTACLE_SPEED * np.cos(theta)
-                vy = MIN_OBSTACLE_SPEED * np.sin(theta)
-            else:
-                f = MIN_OBSTACLE_SPEED / vmag2
-                vx, vy = vx * f, vy * f
-
+        vx = vmag * np.cos(theta)
+        vy = vmag * np.sin(theta)
         new_speeds[i] = [vx, vy]
     return new_speeds
 
@@ -213,11 +205,11 @@ ax.grid(True)
 fig.patch.set_facecolor("white")
 ax.set_facecolor("white")
 
-# From TSP10: Start = green, Goal = red
+# Start = red, Goal = green
 path_line, = ax.plot([], [], "r-", linewidth=3, label="Robot Path", zorder=10)
 robot_dot, = ax.plot([], [], "ko", markersize=8, zorder=11, label="Robot")
-start_dot, = ax.plot(q_start[0], q_start[1], "go", markersize=8, label="Start")
-goal_dot,  = ax.plot(q_goal[0],  q_goal[1],  "ro", markersize=8, label="Goal")
+start_dot, = ax.plot(q_start[0], q_start[1], "ro", markersize=8, label="Start")
+goal_dot,  = ax.plot(q_goal[0],  q_goal[1],  "go", markersize=8, label="Goal")
 
 # From TSP10: stations (stops) as purple stars — same as "Uğranacak noktalar"
 stations_scatter = ax.scatter(STATIONS[:, 0], STATIONS[:, 1], color="purple", marker="*", s=120, label="Stations (stops)", zorder=9)
@@ -231,17 +223,19 @@ planned_scatter = ax.scatter([], [], c="blue", s=30, marker="o", alpha=0.5, labe
 
 ellipse_patches: List[Ellipse] = []
 rect_patches: List[Rectangle] = []
-expanded_rect_patches: List[Rectangle] = []   # From TSP10: buffered rects (orange dashed)
-circle_patches: List[Circle] = []   # From TSP10: circumcircle around each rectangle (circle border, not ellipse)
+expanded_rect_patches: List[Rectangle] = []   # main1: buffered rects (orange dashed)
 
 ax.legend(loc="upper right")
 
 def init():
-    global q, astar_waypoints, current_waypoint_index, current_stop_index, path_data
+    global q, astar_waypoints, current_waypoint_index, current_stop_index, path_data, rect_obstacles, expanded_rects
 
     q[:] = q_start.copy()
     path_data = [q.copy()]
-    current_stop_index = 0   # First stop is STOPS_LIST[0] (first station)
+    current_stop_index = 0
+    for i, r0 in enumerate(RECT_OBSTACLES_INIT):
+        rect_obstacles[i][:] = r0
+    expanded_rects = compute_expanded_rects(rect_obstacles, buffer=1.0)
 
     path_line.set_data([], [])
     robot_dot.set_data([q[0]], [q[1]])
@@ -250,8 +244,7 @@ def init():
     planned_path_line.set_data([], [])
     planned_scatter.set_offsets(np.empty((0, 2)))
 
-    # A* algorithm: plan path from start to first stop (same stations as TSP10)
-    obstacles_circ = build_obstacles_for_astar(obstacles_true, obstacle_speeds)
+    obstacles_circ = build_obstacles_for_astar(obstacles_true, obstacle_speeds, expanded_rects)
     target = STOPS_LIST[current_stop_index]
     path = plan_astar_from(q, target, obstacles_circ)
     if path:
@@ -266,15 +259,22 @@ def init():
 
 
 def update(frame):
-    global q, obstacle_speeds, astar_waypoints, current_waypoint_index, current_stop_index, path_data
+    global q, obstacle_speeds, rectangle_speeds, rect_obstacles, expanded_rects, astar_waypoints, current_waypoint_index, current_stop_index, path_data
 
-    # From TSP10 / main script: obstacle motion and noise
+    # main1/APF1: stochastic maneuver and move ellipses
     obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
     obstacles_true[:, 0] += obstacle_speeds[:, 0] * dt
     obstacles_true[:, 1] += obstacle_speeds[:, 1] * dt
     obstacles_noisy[:] = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 
-    obstacles_circ = build_obstacles_for_astar(obstacles_true, obstacle_speeds)
+    # main1/APF1: move rectangles and recompute expanded rects each frame
+    rectangle_speeds = apply_stochastic_maneuver(rectangle_speeds)
+    for i in range(len(rect_obstacles)):
+        rect_obstacles[i][0] += rectangle_speeds[i][0] * dt
+        rect_obstacles[i][1] += rectangle_speeds[i][1] * dt
+    expanded_rects = compute_expanded_rects(rect_obstacles, buffer=1.0)
+
+    obstacles_circ = build_obstacles_for_astar(obstacles_true, obstacle_speeds, expanded_rects)
     current_target_tuple = STOPS_LIST[current_stop_index]
 
     # A* algorithm: replan when path blocked, no path, or periodically
@@ -365,25 +365,17 @@ def update(frame):
         ax.add_patch(ell)
         ellipse_patches.append(ell)
 
-    # From TSP10: rectangular obstacles + circumcircle (circle border, not ellipse) + expanded/buffered rects
+    # main1: rectangular obstacles (black) + expanded/buffered rects (orange dashed) — no circumcircles
     for r in rect_patches:
         r.remove()
     rect_patches.clear()
     for r in expanded_rect_patches:
         r.remove()
     expanded_rect_patches.clear()
-    for c in circle_patches:
-        c.remove()
-    circle_patches.clear()
     for x, y, w, h in rect_obstacles:
         rect = Rectangle((x, y), w, h, fill=False, linewidth=2, edgecolor="black", zorder=1)
         ax.add_patch(rect)
         rect_patches.append(rect)
-        cx, cy = x + w / 2, y + h / 2
-        r_circ = math.sqrt((w / 2) ** 2 + (h / 2) ** 2)
-        circle = Circle((cx, cy), r_circ, fill=False, linestyle=":", linewidth=1.5, edgecolor="gray", zorder=1)
-        ax.add_patch(circle)
-        circle_patches.append(circle)
     for x, y, w, h in expanded_rects:
         rect2 = Rectangle((x, y), w, h, fill=False, linewidth=1.5, edgecolor="orange", linestyle="--", zorder=1)
         ax.add_patch(rect2)

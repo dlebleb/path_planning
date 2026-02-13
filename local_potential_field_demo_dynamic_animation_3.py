@@ -9,11 +9,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import matplotlib.animation as animation
+import math
+import random
 
 # ===============================
 # INITIAL SETUP
 # ===============================
-q_goal = np.array([10, 10])
+q_goal_final = np.array([20, 10]) #[10, 10]
 q = np.array([-40.0, -40.0])
 v_robot = 25
 
@@ -51,6 +53,94 @@ b_base = b0 * sizes
 
 a_max = 7
 b_max = 5
+
+# ===============================
+# TSP FUNCTIONS and SETUP
+# ===============================
+def init_environment():
+    """
+    Initializes rectangular obstacles, expanded buffers, and waypoints.
+    """
+
+    # Rectangular large obstacles
+    # x_min, y_min, width, height
+    rect_obstacles = np.array ([
+        [-40, -30, 12, 3],   # truck: narrow and long
+        [20, -35, 6, 3],     # van / minibus
+        [-45, 15, 10, 4],    # large vehicle
+        [5, 25, 3, 2],       # bicycle / small vehicle
+        [-6, -6.5, 12, 3],   # truck
+        [-13.5, -23.0, 12, 6]
+    ], dtype = float)
+
+    # Expanded rectangles (safety buffer)
+    expanded_rects = []
+    for x, y, w, h in rect_obstacles:
+        expanded_rects.append([
+            x - 1,
+            y - 1,
+            w + 2,
+            h + 2
+        ])
+
+    # Slightly shrunken expanded rectangles
+    eps = 0.001
+    eps_expanded_rects = []
+    for x, y, w, h in rect_obstacles:
+        eps_expanded_rects.append([
+            x - 1 + eps,
+            y - 1 + eps,
+            w + 2 - 2*eps,
+            h + 2 - 2*eps
+        ])
+
+    # Waypoints (stations)
+    waypoints = np.array([
+        [-30, -35],
+        [25, -40],
+        [-48, 20],
+        [7, 30],
+        [15, -2],
+    ])
+
+    return rect_obstacles, expanded_rects, eps_expanded_rects, waypoints
+
+rect_obstacles, expanded_rects, eps_expanded_rects, waypoints = init_environment()
+# rectangles are moving with the same speed as the elliptical obstacles
+rectangle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1]])
+rectangle_speeds = rectangle_speeds * 8
+
+# function for updating expanded rects from rect_obstacles
+def compute_expanded_rects(rect_obstacles, buffer=1.0):
+    """
+    rect_obstacles: (N,4) array [x, y, w, h]
+    buffer: safety margin (meters)
+    """
+    expanded = np.zeros_like(rect_obstacles)
+    expanded[:, 0] = rect_obstacles[:, 0] - buffer
+    expanded[:, 1] = rect_obstacles[:, 1] - buffer
+    expanded[:, 2] = rect_obstacles[:, 2] + 2*buffer
+    expanded[:, 3] = rect_obstacles[:, 3] + 2*buffer
+    return expanded
+
+from TSP12 import (
+    rectangle_corners_center,
+    line_mb,
+    computeRectangleCircumcircle,
+    point_to_line_distance,
+    point_in_rect,
+    check_rectHit,
+    gotoCorner3,
+    #calculateDistance,
+    bestPath,
+    build_tsp_indices,
+    random_path,
+    fitness,
+    get_swaps,
+    apply_swaps,
+    PSO_TSP,
+    build_full_geometric_path
+)
 
 # ===============================
 # FORCE FUNCTIONS
@@ -137,35 +227,6 @@ def total_force(q, q_goal, obstacles_noisy, obstacle_speeds):
     F_att = attractive_force(q, q_goal)
     F_rep = repulsive_force(q, obstacles_noisy, obstacle_speeds)
     return F_att + F_rep
-
-# def resolve_obstacle_collisions(obstacles_true, obstacle_speeds):
-#     N = len(obstacles_true)
-
-#     # --- compute dynamic radii ---
-#     radii = np.zeros(N)
-#     for i in range(N):
-#         vx, vy = obstacle_speeds[i]
-#         vmag = np.sqrt(vx**2 + vy**2)
-
-#         a_i = a_base[i] + alpha * vmag
-#         b_i = b_base[i] + beta  * vmag
-
-#         # realistic effective radius = max(axis lengths)
-#         radii[i] = max(a_i, b_i)
-
-#     # --- pairwise collision check ---
-#     for i in range(N):
-#         for j in range(i+1, N):
-
-#             difference = obstacles_true[i] - obstacles_true[j]
-#             distance = np.linalg.norm(difference)
-#             allowed_distance = radii[i] + radii[j]
-
-#             if distance < allowed_distance and distance > 1e-9:  # collision
-#                 penetration = allowed_distance - distance
-#                 direction = difference / distance  # normalized
-#                 obstacles_true[i] += direction * (penetration / 2)
-#                 obstacles_true[j] -= direction * (penetration / 2)
 
 def apply_stochastic_maneuver(obstacle_speeds, maneuver_prob=0.25,
                               magnitude_sigma=0.05, turn_sigma=0.02):
@@ -283,10 +344,10 @@ for i in range(X.shape[0]):
         pos = np.array([X[i,j], Y[i,j]])
 
         # calculate potentia; for each frame
-        Z[i,j] = potential(pos, q_goal, obstacles_noisy, obstacle_speeds)
+        Z[i,j] = potential(pos, q_goal_final, obstacles_noisy, obstacle_speeds)
 
         # force field
-        Fx, Fy = total_force(pos, q_goal, obstacles_noisy, obstacle_speeds)
+        Fx, Fy = total_force(pos, q_goal_final, obstacles_noisy, obstacle_speeds)
         U[i,j] = Fx
         V[i,j] = Fy
 
@@ -315,9 +376,11 @@ robot_dot, = ax.plot([], [], 'ro', markersize=6)
 true_scatter = ax.scatter([], [], c='black', s=40)
 noisy_scatter = ax.scatter([], [], c='red', s=40)
 
-goal_dot, = ax.plot(q_goal[0], q_goal[1], 'go', markersize=8, label="Goal")
+goal_dot, = ax.plot(q_goal_final[0], q_goal_final[1], 'go', markersize=8, label="Goal")
 
 ellipse_patches = []
+rect_patches = []
+expanded_rect_patches = []
 
 def init():
     path_line.set_data([], [])
@@ -327,14 +390,39 @@ def init():
     return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot
 
 tolerance = 1
+time = int(0)
+
+
+traveller_sm, route_sm = bestPath(waypoints, q, q_goal_final)
+N, START, END, WAYPOINTS, nodes = build_tsp_indices(q, q_goal_final, waypoints)
+best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
+full_geometric_path = build_full_geometric_path(best_path,route_sm)
+q_goal = full_geometric_path[3]
+
+
+
 # ===============================
 # UPDATE FUNCTION
 # ===============================
-
 def update(frame):
     global q
     global obstacle_speeds
     global ani
+    global time
+    global q_goal_final
+    global q_goal
+    time += 1
+    global stop_counter
+    stop_counter = 0
+
+    if (time % 100 == 0): ## path is updated every 1s.
+       #q_goal = tsp()
+        traveller_sm, route_sm = bestPath(waypoints, q, q_goal)
+        N, START, END, WAYPOINTS, nodes = build_tsp_indices(q, q_goal, waypoints)
+        best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
+        full_geometric_path = build_full_geometric_path(best_path,route_sm)
+        q_goal = full_geometric_path[3+stop_counter]
+        stop_counter = 0
 
     # 0) random maneuver (new speeds)
     obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
@@ -343,9 +431,11 @@ def update(frame):
     obstacles_true[:,0] += obstacle_speeds[:,0] * dt
     obstacles_true[:,1] += obstacle_speeds[:,1] * dt
 
-    #print("Obstacle 0 position:", obstacles_true[0])
-    # 1.1) resolve collisions between obstacles (prevent overlap)
-    #resolve_obstacle_collisions(obstacles_true, obstacle_speeds)
+   # Move rectangles (ONLY x, y)
+    rect_obstacles[:, 0] += rectangle_speeds[:, 0] * dt
+    rect_obstacles[:, 1] += rectangle_speeds[:, 1] * dt
+    # --- Recompute expanded rectangles ---
+    expanded_rects = compute_expanded_rects(rect_obstacles, buffer=1.0)
 
     # --- 2) Noise sample ---
     obstacles_noisy[:] = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
@@ -360,8 +450,14 @@ def update(frame):
     path_data.append(q.copy())
 
     # --- STOP CONDITION: close enough to goal ---
-    if np.linalg.norm(q - q_goal) < tolerance:
-        print(f"Reached goal at frame {frame}")
+    if np.linalg.norm(q - q_goal) < tolerance: # if arrives at at a stop
+        print("I've arrived")
+        stop_counter += 1 # 
+        q_goal = full_geometric_path[3+stop_counter]
+
+    if np.linalg.norm(q - q_goal_final) < tolerance:
+        print(f"Reached goal at time {time/100}")
+        #print(f"Reached goal at frame {frame}")
         ani.event_source.stop()
         return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot
 
@@ -409,6 +505,34 @@ def update(frame):
         ax.add_patch(ellipse)
         ellipse_patches.append(ellipse)
 
+    # Waypointleri mor yıldız olarak çiz
+    ax.scatter(waypoints[:,0], waypoints[:,1],
+    color='purple', marker='*', s=120, label="Stations")
+    
+    # --- Remove old rectangles ---
+    for r in rect_patches:
+        r.remove()
+    rect_patches.clear()
+
+    # Dikdörtgen engeller and the circle
+    for x, y, w, h in rect_obstacles:
+        rect = plt.Rectangle((x, y), w, h, fill=False, linewidth=2)
+        ax.add_patch(rect)
+        rect_patches.append(rect)
+
+    # --- Remove old expanded rectangles ---
+    for er in expanded_rect_patches:
+        er.remove()
+    expanded_rect_patches.clear()
+
+    # Genişletilmiş rectangle'lar (buffered)
+    for x, y, w, h in expanded_rects:
+        rect2 = plt.Rectangle((x, y), w, h, fill=False, linewidth=1.5,
+                            edgecolor='orange', linestyle='--')
+        ax.add_patch(rect2)
+        expanded_rect_patches.append(rect2)
+
+    #print(f"Time: {time/100} s.")
     return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot
 
 

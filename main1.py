@@ -13,6 +13,14 @@ import math
 import random
 from TSP import *
 from APF1 import *
+from animation_summary import (
+    init_summary,
+    set_route,
+    log_path_point,
+    log_obstacles,
+    end_summary,
+    write_summary,
+)
 
 # ===============================
 # INITIAL SETUP
@@ -76,9 +84,14 @@ q_goal                              = full_geometric_path[2]
 # ===============================
 # RUN ANIMATION
 # ===============================
+init_summary("main1", dt=0.01, obstacle_log_interval=10)
+set_route(q, q_goal_final, [tuple(w) for w in waypoints], [f"Station {i+1}" for i in range(len(waypoints))])
+log_path_point(0, q[0], q[1])
+
 stop_counter    = 0
 ani             = None
 goals_achieved_so_far = []
+summary_written = False
 mystates = {
     "q": q,
     "obstacle_speeds": obstacle_speeds,
@@ -112,17 +125,39 @@ mystates = {
 def init_anim():
     return init(path_line, robot_dot, true_scatter, noisy_scatter, goal_dot)
 
+def update_with_log(frame):
+    result = update(frame, mystates)
+    if result is not None:
+        end_summary(success=True)
+        if write_summary() is not None:
+            global summary_written
+            summary_written = True
+        return result
+    log_path_point(frame, mystates["q"][0], mystates["q"][1])
+    if frame % 10 == 0:
+        log_obstacles(
+            frame,
+            mystates["obstacles_true"],
+            mystates["obstacle_speeds"],
+            mystates["rect_obstacles"],
+        )
+    return result
+
 ani = animation.FuncAnimation(
     fig,
-    update,   # <-- PARANTEZ YOK
+    update_with_log,
     frames=400,
-    fargs=(mystates,),
     init_func=init_anim,
     interval=40,
     blit=False
 )
 
 mystates["ani"] = ani
-plt.show()
+try:
+    plt.show()
+finally:
+    if not summary_written:
+        end_summary(success=False)
+        write_summary()
 
 

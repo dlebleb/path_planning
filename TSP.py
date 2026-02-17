@@ -295,7 +295,7 @@ def bestPath(waypoints,q,q_goal, rect_obstacles, expanded_rects, eps_expanded_re
             for itemm in goal:
                 weight_list.append(itemm["weight"])
 
-            min_weight = min(weight_list)
+            min_weight = min(weight_list) # there is a bug here: ValueError: min() arg is an empty sequence
             traveller_sm[i,j] = min_weight
             
             # min weight

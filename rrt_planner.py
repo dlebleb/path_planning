@@ -20,10 +20,9 @@ import math
 import random
 import numpy as np
 from typing import List, Optional
-from TSP_Rachel import Point, Obstacle
+from TSP_Rachel import Point
 from APF1 import *
 from TSP import *
-
 
 class RRTNode:
     """
@@ -106,7 +105,7 @@ class RRTPlanner:
 
             eps = 1e-12
             # move robot center to origin and transform
-            q_x, q_y = (point[0]-obs_x)/(a+eps), (point[1]-obs_y)/(b+eps)
+            q_x, q_y = (point.x-obs_x)/(a+eps), (point.y-obs_y)/(b+eps)
 
             # distance of the robot to origin -1
             dE = np.sqrt(q_x**2 + q_y**2) - 1
@@ -119,19 +118,18 @@ class RRTPlanner:
 
     # returns false or true if a point is inside the rectangular region
     def _is_collision_free_rect(self, point: Point, rect_obstacles: List):
-        X, Y = point[0], point[1]
+        X, Y = point.x, point.y
         for rect in rect_obstacles:
             x, y, w, h = rect
             if (x <= X <= x + w) and (y <= Y <= y + h):
-                return False
+                return False  # point is inside the rectangular region
         return True
 
-
-    def _is_path_clear(self, p1: Point, p2: Point, obstacles: List[Obstacle]) -> bool:
+    def _is_path_clear(self, p1: Point, p2: Point, obstacles_noisy: np.ndarray, obstacle_speeds: np.ndarray) -> bool:
         """
-        Check if the path between two points is collision-free.
+        Check if the path between two points is collision-free from ellipses.
         
-        Samples 10 points along the line segment and checks each for collisions.
+        Samples 50 points along the line segment and checks each for collisions.
         This ensures the entire path segment is safe, not just the endpoints.
         
         Args:
@@ -142,17 +140,53 @@ class RRTPlanner:
         Returns:
             True if path is clear, False if collision detected
         """
-        # Check multiple points along the path
-        for i in range(10):
-            t = i / 10.0  # Interpolation parameter (0.0 to 1.0)
+        # Check multiple points along the path from p1 to p2 (exclude points)
+        for t in np.linspace(0, 1, 50, endpoint = False)[1:-1]:
             check_point = Point(
                 p1.x + t * (p2.x - p1.x),
                 p1.y + t * (p2.y - p1.y)
             )
-            if not self._is_collision_free(check_point, obstacles):
+            if not self._is_collision_free(check_point, obstacles_noisy, obstacle_speeds):
                 return False
         return True
     
+    def _is_path_clear_rect(self, p1: Point, p2: Point, rect_obstacles: List, expanded_rects: List) -> bool:
+            """
+            Check if the path between two points is collision-free from rectangles.
+            
+            Samples 50 points along the line segment and checks each for collisions.
+            This ensures the entire path segment is safe, not just the endpoints.
+            
+            Args:
+                p1: Start point
+                p2: End point
+                obstacles: List of obstacles
+            
+            Returns:
+                True if path is clear, False if collision detected
+            """
+            p1_coord = np.array([p1.x, p1.y])
+            p2_coord = np.array([p2.x, p2.y])
+            eq = line_mb(p1_coord,p2_coord)
+            # Check multiple points along the path for rectangular obstacles
+            for rect, erect in zip(rect_obstacles, expanded_rects):
+                eps = 0.015 # error threshold
+                # 1) radius approximation (coarse filter)
+                center, radius = computeRectangleCircumcircle(rect)
+                d = point_to_line_distance(eq, center)
+                if d >= radius + eps:
+                    continue
+
+                # 2) actual check on the SAME expanded rect
+                for t in np.linspace(0, 1, 50, endpoint = False)[1:-1]:
+                    check_point = Point(
+                        p1.x + t * (p2.x - p1.x),
+                        p1.y + t * (p2.y - p1.y)
+                    )
+                    if not self._is_collision_free_rect(check_point, [rect]): # [erect] aslinda ama degistirdim. 
+                        return False
+            return True
+
     def _find_nearest(self, tree: List[RRTNode], point: Point) -> RRTNode:
         """
         Find the nearest node in the tree to a given point.
@@ -204,7 +238,48 @@ class RRTPlanner:
         
         return Point(from_node.position.x + dx, from_node.position.y + dy)
     
-    def plan_path(self, start: Point, goal: Point, obstacles: List[Obstacle],
+    def _push_out_of_collision(self, q: Point, rect_obstacles: List, obstacles_noisy: np.ndarray, obstacle_speeds: np.ndarray, F: np.ndarray, max_iter = 20) -> Point:
+        """
+        Move step_size distance from goal or start if there is collision between elliptical obstacles and rectangles.
+        
+        If q (start or goal of the tree) is colliding with obstacles,
+        move exactly step_size in the direction of the force coming from the global path.
+        
+        Args:
+            q: Start/Goal
+            F: Force coming from APF
+        
+        Returns:
+            New point step_size away from start/goal toward APF
+        """
+        normF = np.linalg.norm(F)
+        direction = F / normF 
+
+        for _ in range(max_iter):
+
+            free = (
+                self._is_collision_free(q, obstacles_noisy, obstacle_speeds) and
+                self._is_collision_free_rect(q, rect_obstacles)
+            )
+
+            if free:
+                return q
+
+            q = Point(
+                q.x + self.step_size * direction[0],
+                q.y + self.step_size * direction[1])
+
+        # check again after max_iterations
+        final_free = (
+                self._is_collision_free(q, obstacles_noisy, obstacle_speeds) and
+                self._is_collision_free_rect(q, rect_obstacles)
+            )
+        
+        if not final_free:
+            print("Warning: Could not fully escape obstacle after max_iter.")
+        return q
+
+    def plan_path(self, start: Point, goal: Point, obstacles_noisy:np.ndarray, rect_obstacles: List, obstacle_speeds: np.ndarray, F: np.ndarray, expanded_rects: List,
                   bounds: Optional[tuple] = None) -> Optional[List[Point]]:
         """
         Plan path from start to goal using RRT algorithm.
@@ -228,11 +303,11 @@ class RRTPlanner:
         Returns:
             List of points forming path from start to goal, or None if not found
         """
-        # Validate start and goal are in free space
-        if not self._is_collision_free(start, obstacles) or \
-           not self._is_collision_free(goal, obstacles):
-            return None
-        
+        # Validate start and goal are in free space, if not psuhb out of collision
+        start = self._push_out_of_collision(start, rect_obstacles, obstacles_noisy, obstacle_speeds, F)
+        goal  = self._push_out_of_collision(goal, rect_obstacles, obstacles_noisy, obstacle_speeds, F)
+
+    
         # Initialize tree with start node
         root = RRTNode(start)
         tree = [root]
@@ -241,11 +316,12 @@ class RRTPlanner:
         if bounds:
             x_min, x_max, y_min, y_max = bounds
         else:
-            # Auto-detect bounds from obstacles and points
-            all_x = [p.x for p in [start, goal]] + [obs.position.x for obs in obstacles]
-            all_y = [p.y for p in [start, goal]] + [obs.position.y for obs in obstacles]
-            x_min, x_max = min(all_x) - 2, max(all_x) + 2
-            y_min, y_max = min(all_y) - 2, max(all_y) + 2
+            # Auto-detect bounds from start and goal points initially
+            all_x = [p.x for p in [start, goal]]
+            all_y = [p.y for p in [start, goal]]
+            margin  = 10
+            x_min, x_max = min(all_x) - margin, max(all_x) + margin
+            y_min, y_max = min(all_y) - margin, max(all_y) + margin
         
         # RRT main loop
         for _ in range(self.max_iterations):
@@ -267,8 +343,8 @@ class RRTPlanner:
             # Extend tree toward sampled point
             new_point = self._steer(nearest, random_point)
             
-            # Check if extension is collision-free
-            if self._is_path_clear(nearest.position, new_point, obstacles):
+            # Check if extension is collision-free from elliptical onbstacles and rectangles
+            if self._is_path_clear(nearest.position, new_point, obstacles_noisy, obstacle_speeds) and self._is_path_clear_rect(nearest.position, new_point, rect_obstacles, expanded_rects):
                 # Add new node to tree
                 new_node = RRTNode(new_point, nearest)
                 tree.append(new_node)
@@ -276,7 +352,7 @@ class RRTPlanner:
                 # Check if we're close enough to goal
                 if new_point.distance_to(goal) <= self.goal_threshold:
                     # Try to connect directly to goal
-                    if self._is_path_clear(new_point, goal, obstacles):
+                    if self._is_path_clear(new_point, goal, obstacles_noisy, obstacle_speeds) and self._is_path_clear_rect(new_point, goal, rect_obstacles, expanded_rects):
                         goal_node = RRTNode(goal, new_node)
                         tree.append(goal_node)
                         
@@ -291,42 +367,42 @@ class RRTPlanner:
         
         return None  # Path not found within max_iterations
     
-    def plan_paths_between_waypoints(self, waypoints: List[Point], 
-                                     obstacles: List[Obstacle],
-                                     bounds: Optional[tuple] = None) -> List[List[Point]]:
-        """
-        Plan paths between consecutive waypoints.
+    # def plan_paths_between_waypoints(self, waypoints: List[Point], 
+    #                                  obstacles: List[Obstacle],
+    #                                  bounds: Optional[tuple] = None) -> List[List[Point]]:
+    #     """
+    #     Plan paths between consecutive waypoints.
         
-        This function is used when you have multiple waypoints from the global planner.
-        It plans a separate RRT path for each segment between consecutive waypoints.
+    #     This function is used when you have multiple waypoints from the global planner.
+    #     It plans a separate RRT path for each segment between consecutive waypoints.
         
-        Example:
-            waypoints = [start, wp1, wp2, goal]
-            Returns: [path1 (start->wp1), path2 (wp1->wp2), path3 (wp2->goal)]
+    #     Example:
+    #         waypoints = [start, wp1, wp2, goal]
+    #         Returns: [path1 (start->wp1), path2 (wp1->wp2), path3 (wp2->goal)]
         
-        Args:
-            waypoints: Ordered list of waypoints (from global planner)
-            obstacles: List of obstacles
-            bounds: Workspace bounds
+    #     Args:
+    #         waypoints: Ordered list of waypoints (from global planner)
+    #         obstacles: List of obstacles
+    #         bounds: Workspace bounds
         
-        Returns:
-            List of path segments, one for each waypoint pair
-        """
-        if len(waypoints) < 2:
-            return []
+    #     Returns:
+    #         List of path segments, one for each waypoint pair
+    #     """
+    #     if len(waypoints) < 2:
+    #         return []
         
-        paths = []
-        # Plan path for each consecutive pair of waypoints
-        for i in range(len(waypoints) - 1):
-            path = self.plan_path(waypoints[i], waypoints[i + 1], obstacles, bounds)
-            if path:
-                paths.append(path)
-            else:
-                # Fallback: straight line if RRT fails
-                # In practice, potential fields will handle obstacle avoidance
-                paths.append([waypoints[i], waypoints[i + 1]])
+    #     paths = []
+    #     # Plan path for each consecutive pair of waypoints
+    #     for i in range(len(waypoints) - 1):
+    #         path = self.plan_path(waypoints[i], waypoints[i + 1], obstacles, bounds)
+    #         if path:
+    #             paths.append(path)
+    #         else:
+    #             # Fallback: straight line if RRT fails
+    #             # In practice, potential fields will handle obstacle avoidance
+    #             paths.append([waypoints[i], waypoints[i + 1]])
         
-        return paths
+    #     return paths
 
 
 # ---------------------------------------------------------------------------
@@ -348,24 +424,13 @@ def main():
 
     start = Point(0.0, 0.0)
     goal = Point(4.0, 4.0)
-    damla = Point(-34,-15)
-
-
     rrt = RRTPlanner(step_size=0.3, max_iterations=2000)
-    
-    start = Point(0.0, 0.0)
-    goal = Point(4.0, 4.0)
     #obstacles = DEFAULT_OBSTACLES
-    obstacles = obstacles_noisy
-    bounds = (-1.0, 5.0, -1.0, 5.0)
-    
-    print("Ellipse inside:",
-          rrt._is_collision_free(np.array([0.5, 0.0]), obstacles, speeds))
-
-
+    #bounds = (-1.0, 5.0, -1.0, 5.0)
+    F = np.array([-2, 3])
 
     print("Planning RRT path...")
-    path = rrt.plan_path(start, goal, obstacles, bounds)
+    path = rrt.plan_path(start, goal, obstacles_noisy, rect_obstacles, obstacle_speeds, F, expanded_rects)
     
     if path:
         print(f"Path found with {len(path)} points")

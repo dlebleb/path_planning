@@ -12,7 +12,8 @@ import matplotlib.animation as animation
 import math
 import random
 from TSP import *
-from APF2 import *
+from APF3 import *
+from rrt_planner import RRTPlanner
 
 # ===============================
 # INITIAL SETUP
@@ -37,13 +38,15 @@ initial_obstacles   = obstacles_true.copy()
 rect_obstacles, expanded_rects, eps_expanded_rects, waypoints = init_environment()
 # rectangles are moving with the same speed as the elliptical obstacles
 rectangle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1]])
-rectangle_speeds = rectangle_speeds * 80
+rectangle_speeds = rectangle_speeds * 0
+
+rrt = RRTPlanner(step_size=0.3, max_iterations=2000)
 
 # ===============================
 # ANIMATION SETUP
 # ===============================
 
-fig, ax = plt.subplots(figsize=(8, 8))
+fig, ax = plt.subplots(figsize=(8, 8), dpi = 50)
 ax.set_xlim(-50, 50)
 ax.set_ylim(-50, 50)
 ax.set_title("Dynamic Obstacle Avoidance Animation")
@@ -107,7 +110,8 @@ mystates = {
     "eps_expanded_rects": eps_expanded_rects,
     "full_geometric_path": full_geometric_path,
     "stop_counter": stop_counter,
-    "goals_achieved_so_far": goals_achieved_so_far}
+    "goals_achieved_so_far": goals_achieved_so_far,
+    "rrt": rrt}
 
 def init_anim():
     return init(path_line, robot_dot, true_scatter, noisy_scatter, goal_dot)

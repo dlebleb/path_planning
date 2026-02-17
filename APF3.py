@@ -12,6 +12,7 @@ import matplotlib.animation as animation
 import math
 import random
 from TSP import *
+from rrt_planner import *
 # ===============================
 # TSP FUNCTIONS and SETUP
 # ===============================
@@ -170,11 +171,17 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
         # d0_i = d0 * max(a, b)
 
         if dE < d0:
-            F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
-            # yön vektörü (normalize edilmiş fark)
-            grad_Dq = (q - obs) / (dE + 1e-12)
-            # toplam kuvvet
-            F_rep = F_mag * grad_Dq
+            if dE >= 0.5: 
+                F_mag = 0.03 #k_rep * (1/4 - 1/d0) * (1/4**2)
+                #F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
+                # yön vektörü (normalize edilmiş fark)
+                grad_Dq = (q - obs) / (dE + 1e-12)
+                # toplam kuvvet
+                F_rep = F_mag * grad_Dq
+            else:
+                F_mag = 1000 #k_rep * (1/0.1 - 1/d0) * (1/0.1**2)
+                grad_Dq = (q - obs) / (dE + 1e-12)
+                F_rep = F_mag * grad_Dq
 
         else:
             F_rep = np.array([0.0, 0.0])
@@ -387,7 +394,7 @@ def update(frame,mystates):
 # def update(frame,q,obstacle_speeds,ani,time,q_goal_final,q_goal,waypoints,obstacles_true,rectangle_speeds,rect_obstacles,obstacles_noisy,sigma,
 #            v_robot,path_data,path_line, robot_dot, true_scatter, noisy_scatter, goal_dot, ellipse_patches, rect_patches, expanded_rect_patches,
 #            ax,expanded_rects, eps_expanded_rects, full_geometric_path,stop_counter):
-    from TSP import bestPath,build_tsp_indices,PSO_TSP,build_full_geometric_path
+    #from TSP import bestPath,build_tsp_indices,PSO_TSP,build_full_geometric_path
     q                     = mystates["q"]
     obstacle_speeds       = mystates["obstacle_speeds"]
     ani                   = mystates["ani"]
@@ -416,6 +423,7 @@ def update(frame,mystates):
     full_geometric_path   = mystates["full_geometric_path"]
     stop_counter          = mystates["stop_counter"]
     goals_achieved_so_far = mystates["goals_achieved_so_far"]
+    rrt                   = mystates["rrt"]
 
     #path_line,robot_dot,true_scatter,noisy_scatter, goal_dot = init(path_line,robot_dot,true_scatter,noisy_scatter, goal_dot)
     tolerance = 1
@@ -456,7 +464,7 @@ def update(frame,mystates):
 
     # 0) random maneuver (new speeds)
     obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
-    rectangle_speeds = apply_stochastic_maneuver(rectangle_speeds)
+    #rectangle_speeds = apply_stochastic_maneuver_rectangles(rectangle_speeds)
     # --- 1) Move obstacles ---
     obstacles_true[:,0] += obstacle_speeds[:,0] * dt
     obstacles_true[:,1] += obstacle_speeds[:,1] * dt
@@ -477,9 +485,34 @@ def update(frame,mystates):
 
     # --- 4) Robot motion ---
     F_norm = np.linalg.norm(F)
-    direction = F/F_norm # normalize ediyor, yon bulmak icin, bunu da uygun bir katsayi ile carp. 
-    q[:] = q + direction * v_robot * dt # rrt varken 1.2 ve 0.8 yap. 
+
+    if F_norm < 1e-8:
+        direction = np.zeros_like(F)
+    else:
+        direction = F / F_norm
+
+    L = 1.0   # local horizon
+    q_target_local = q + L * direction * 0.3
+
+    rrt_path = rrt.plan_path(
+        start = Point(q[0],q[1]),
+        goal = Point(q_target_local[0], q_target_local[1]),
+        obstacles_noisy=obstacles_noisy,
+        rect_obstacles=rect_obstacles,
+        obstacle_speeds=obstacle_speeds,
+        F=F,
+        expanded_rects=expanded_rects
+    )
+
+    if rrt_path is not None and len(rrt_path) > 1:
+        q = np.array([rrt_path[1].x,rrt_path[1].y])
+    else:
+        # fallback APF micro step
+        q = q + rrt.step_size * direction
+        #q[:] = q + direction * v_robot * dt # rrt varken 1.2 ve 0.8 yap. 
+
     path_data.append(q.copy())
+
 
     # --- STOP CONDITION: close enough to goal ---
 
@@ -613,6 +646,7 @@ def update(frame,mystates):
     mystates["full_geometric_path"]   = full_geometric_path
     mystates["stop_counter"]          = stop_counter
     mystates["goals_achieved_so_far"] = goals_achieved_so_far
+    mystates["rrt"]                   = rrt
 
     #return []
     return mystates

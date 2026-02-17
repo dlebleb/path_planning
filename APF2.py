@@ -170,11 +170,17 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
         # d0_i = d0 * max(a, b)
 
         if dE < d0:
-            F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
-            # yön vektörü (normalize edilmiş fark)
-            grad_Dq = (q - obs) / (dE + 1e-12)
-            # toplam kuvvet
-            F_rep = F_mag * grad_Dq
+            if dE >= 0.5: 
+                F_mag = 0.03
+                #F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
+                # yön vektörü (normalize edilmiş fark)
+                grad_Dq = (q - obs) / (dE + 1e-12)
+                # toplam kuvvet
+                F_rep = F_mag * grad_Dq
+            else:
+                F_mag = 1000
+                grad_Dq = (q - obs) / (dE + 1e-12)
+                F_rep = F_mag * grad_Dq
 
         else:
             F_rep = np.array([0.0, 0.0])

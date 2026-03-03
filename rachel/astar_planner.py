@@ -21,8 +21,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Setup: Start, Goal, Obstacles
-START = np.array([-20.0, -20.0])
-GOAL = np.array([15.0, 15.0])  # Moved away from obstacles to ensure it's collision-free
+START = np.array([-40.0, -40.0])
+GOAL = np.array([20.0, 10.0])  # Moved away from obstacles to ensure it's collision-free
 
 # Obstacle centers
 obstacles_true = np.array(

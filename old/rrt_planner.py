@@ -21,8 +21,8 @@ import random
 import numpy as np
 from typing import List, Optional
 from TSP_Rachel import Point
-from APF1 import *
-from TSP import *
+from APF5 import *
+from TSP_main import *
 
 class RRTNode:
     """
@@ -52,7 +52,7 @@ class RRTPlanner:
     but efficiently finds paths in complex environments.
     """
     
-    def __init__(self, step_size: float = 0.5, max_iterations: int = 3000, 
+    def __init__(self, step_size: float = 0.15, max_iterations: int = 3000, 
                  goal_threshold: float = 0.3, safety_margin: float = 0.2):
         """
         Initialize RRT planner.
@@ -84,7 +84,7 @@ class RRTPlanner:
         alpha = 0.2   # major scaling (large)
         beta  = 0.1   # minor scaling (small)
         # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-        sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9])
+        sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
         # incorporate static size                          
         a_base = a0 * sizes 
         b_base = b0 * sizes
@@ -303,7 +303,7 @@ class RRTPlanner:
         Returns:
             List of points forming path from start to goal, or None if not found
         """
-        # Validate start and goal are in free space, if not psuhb out of collision
+        # Validate start and goal are in free space, if not push out of collision
         start = self._push_out_of_collision(start, rect_obstacles, obstacles_noisy, obstacle_speeds, F)
         goal  = self._push_out_of_collision(goal, rect_obstacles, obstacles_noisy, obstacle_speeds, F)
 
@@ -404,6 +404,26 @@ class RRTPlanner:
         
     #     return paths
 
+
+    # Smmothing the rrt path
+
+    def smooth_moving_average(self, path):
+        
+        # Point objelerini numpy array'e çevir
+        pts = np.array([[p.x, p.y] for p in path])
+        smoothed = pts.copy()
+
+        for i in range(1, len(pts)-1):
+            smoothed[i] = (
+                0.4*pts[i-1] +
+                0.2*pts[i] +
+                0.4*pts[i+1]
+            )
+
+        # tekrar Point objesine çevir
+        smoothed_points = [Point(x,y) for x,y in smoothed]
+
+        return smoothed_points
 
 # ---------------------------------------------------------------------------
 # Example Usage

@@ -120,11 +120,106 @@ def remove_visited_waypoints(waypoints, visited_goals, tol=1.0):
 
     return waypoints[keep_mask]
 
+# removing rectangle corners from the full_geometric_path
+def extract_polyline(full_geometric_path, waypoints):
+
+    polyline = []
+
+    # 1️⃣ başlangıcı iki kez ekle
+    start = full_geometric_path[0]
+    polyline.append(start)
+    polyline.append(start)
+
+    # 2️⃣ path sırasına göre waypointleri ekle
+    for p in full_geometric_path:
+        for wp in waypoints:
+            if np.array_equal(p, wp):
+                polyline.append(p)
+
+    # 3️⃣ final goal ekle
+    final_goal = full_geometric_path[-1]
+    polyline.append(final_goal)
+
+    return np.array(polyline)
+
+# new function for calculating the projection of q on the closest line segment coming from the global path
+# t = AQ nun AB uzerindeki projection'in uzunlugu / AB nin uzunlugu 
+
+def closest_point_and_tangent_on_polyline(q, full_geometric_path, q_goal, flag = 1):
+    """
+    q: robot position
+    path_pts: full_geometric_path (P)
+    q_goal_final: optional, tangent yönünü final goal'a göre düzeltebilmek için
+
+    Returns:
+      p_proj: q'ya polyline üzerinde en yakin nokta
+      t_hat:  o segmentin unit tangent yönü (direction of the vector AB)
+      seg_idx: projeksiyonun düştüğü segment index'i
+      t_clamped: float, AQ projeksiyon AB segment'inde nereye denk geliyor? (between 0 and 1)
+    """
+    P = full_geometric_path
+
+    best_d = float("inf")
+    best_p = None
+    best_t_hat = None
+
+    # her segment için tara
+    for i in range(len(P) - 1):
+        A = P[i]
+        B= P[i+1]
+        AB = B - A
+        AQ = q - A
+
+        AB2 = np.linalg.norm(AB)**2  # ||ab||^2
+        if AB2 < 1e-12:
+            continue
+
+        # 1) projection parameter (infinite line)
+        # t = AQ.AB/norm(AB)^2
+        t = float(np.dot(AQ, AB) / AB2)
+
+        # 2) clamp to segment
+        t_clamped = max(0.0, min(1.0, t))
+
+        # 3) find projected point and calculate the distance to projected point
+        p = A+ t_clamped * AB
+        d = calculateDistance(q,p)
+
+        # 5) keep best
+        if d < best_d:
+            best_d = d
+            best_p = p
+
+            # tangent (unit)
+            norm_AB = np.linalg.norm(AB)
+            best_t_hat = AB / norm_AB
+
+    # fallback: path çok bozuksa
+    if best_p is None:
+        best_p = P[0].copy()
+        best_t_hat = np.array([1.0, 0.0])
+
+    current_goal = q_goal   # bu aktif station olabilir veya final olabilir
+    
+    # İSTEĞE BAĞLI: tangent yönünü final goal'a doğru seç
+    if current_goal is not None and flag == 1:
+        to_goal = current_goal - q
+        if np.dot(best_t_hat, to_goal) < 0:
+            best_t_hat = -best_t_hat
+
+    return best_p, best_t_hat
+
+def pull_tangent_force(q, p, t_hat):
+    k_pull, k_tan = 15.0, 60.0
+    F_pull = -k_pull * (q - p)
+    F_tan = k_tan * t_hat
+    return F_pull + F_tan
+
 # ===============================
 # FORCE FUNCTIONS
 # ===============================
 def attractive_force(q, q_goal):
-    k_att, k_rep, d0, dt = 10.0, 10.0, 10.0, 0.01
+    k_att, k_rep, d0, dt = 60.0, 10.0, 10.0, 0.01 #k_att was previously 10.0, 20.0 (last)
     F_att = -k_att * (q - q_goal)
     return F_att
 
@@ -134,13 +229,13 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     alpha = 0.2   # major scaling (large)
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9])
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
     a_max = 7
     b_max = 5
-    k_att, k_rep, d0, dt = 10.0, 10.0, 5.0, 0.01 #d0 was 10.0
+    k_att, k_rep, d0, dt = 10.0, 10.0, 1.0, 0.01 #d0 was 10.0, 5.0
 
     F_rep_total = np.array([0.0, 0.0])
     for i, obs in enumerate(obstacles_noisy):
@@ -172,14 +267,14 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
 
         if dE < d0:
             if dE >= 0.5: 
-                F_mag = 0.03 #k_rep * (1/4 - 1/d0) * (1/4**2)
+                F_mag = 0.02 #k_rep * (1/4 - 1/d0) * (1/4**2)
                 #F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
                 # yön vektörü (normalize edilmiş fark)
                 grad_Dq = (q - obs) / (dE + 1e-12)
                 # toplam kuvvet
                 F_rep = F_mag * grad_Dq
             else:
-                F_mag = 1000 #k_rep * (1/0.1 - 1/d0) * (1/0.1**2)
+                F_mag = 100 #k_rep * (1/0.1 - 1/d0) * (1/0.1**2)
                 grad_Dq = (q - obs) / (dE + 1e-12)
                 F_rep = F_mag * grad_Dq
 
@@ -189,7 +284,7 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     return F_rep_total
 
 def repulsive_force_rectangles(q, rect_obstacles):
-    k_rep_rectangle, d0 = 20.0, 20.0
+    k_rep_rectangle, d0 = 50.0, 20.0
 
     F_rep_total_rectangle = np.array([0.0, 0.0])
     for obs in rect_obstacles:
@@ -352,7 +447,7 @@ def is_collision_check(q, obstacles_noisy, obstacle_speeds):
     alpha = 0.2   # major scaling (large)
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9])
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
@@ -424,6 +519,8 @@ def update(frame,mystates):
     stop_counter          = mystates["stop_counter"]
     goals_achieved_so_far = mystates["goals_achieved_so_far"]
     rrt                   = mystates["rrt"]
+    full_geometric_polyline = mystates["full_geometric_polyline"]
+    total_distance        = mystates["total_distance"]
 
     #path_line,robot_dot,true_scatter,noisy_scatter, goal_dot = init(path_line,robot_dot,true_scatter,noisy_scatter, goal_dot)
     tolerance = 1
@@ -433,7 +530,7 @@ def update(frame,mystates):
     alpha = 0.2   # major scaling (large)
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9])
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
@@ -455,12 +552,13 @@ def update(frame,mystates):
         N, START, END, WAYPOINTS, nodes = build_tsp_indices(q, q_goal_final, waypoints)
         best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
         full_geometric_path = build_full_geometric_path(best_path,route_sm)
-
+        full_geometric_polyline = extract_polyline(full_geometric_path, waypoints)
+        
         # RESET HERE
         stop_counter = 0
 
         #q_goal = full_geometric_path[3+stop_counter]
-        q_goal = full_geometric_path[2+stop_counter]
+        q_goal = full_geometric_polyline[2+stop_counter]
 
     # 0) random maneuver (new speeds)
     obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
@@ -483,6 +581,10 @@ def update(frame,mystates):
     # --- 3) Robot force ---
     F = total_force(q, q_goal, obstacles_noisy, obstacle_speeds, rect_obstacles) # vektor toplami zaten sana yonu verir.
 
+    # new addition for the global path
+    p, t_hat = closest_point_and_tangent_on_polyline(q, full_geometric_path, q_goal, flag = 0)
+    F = F + pull_tangent_force(q, p, t_hat)
+
     # --- 4) Robot motion ---
     F_norm = np.linalg.norm(F)
 
@@ -491,8 +593,9 @@ def update(frame,mystates):
     else:
         direction = F / F_norm
 
+    q_old = q.copy()
     L = 1.0   # local horizon
-    q_target_local = q + L * direction * 0.3
+    q_target_local = q + L * direction * 0.5 # added 0.3 recently and it seems to be better
 
     rrt_path = rrt.plan_path(
         start = Point(q[0],q[1]),
@@ -505,14 +608,26 @@ def update(frame,mystates):
     )
 
     if rrt_path is not None and len(rrt_path) > 1:
-        q = np.array([rrt_path[1].x,rrt_path[1].y])
+       
+        rrt_path = rrt.smooth_moving_average(rrt_path)
+        
+        target = np.array([rrt_path[1].x, rrt_path[1].y])
+        vector_to_target = target - q
+        dist = np.linalg.norm(vector_to_target)
+        q = q + v_robot*dt * vector_to_target/dist
+        #q = q + min(v_robot*dt,dist) * vector_to_target/dist
+        
+        #q = np.array([rrt_path[1].x,rrt_path[1].y])
+
     else:
         # fallback APF micro step
-        q = q + rrt.step_size * direction
+        #q = q + rrt.step_size * direction
+        q = q + min(v_robot*dt, rrt.step_size) * direction
         #q[:] = q + direction * v_robot * dt # rrt varken 1.2 ve 0.8 yap. 
 
     path_data.append(q.copy())
-
+    step_distance = np.linalg.norm(q - q_old)
+    total_distance += step_distance
 
     # --- STOP CONDITION: close enough to goal ---
 
@@ -525,7 +640,7 @@ def update(frame,mystates):
         if np.all(q_goal == q_goal_final):
             pass
         else:
-            q_goal = full_geometric_path[2+stop_counter]
+            q_goal = full_geometric_polyline[2+stop_counter]
         # next_idx = 2 + stop_counter
         # if next_idx < len(full_geometric_path):
         #     q_goal = full_geometric_path[next_idx]
@@ -536,6 +651,7 @@ def update(frame,mystates):
     if np.linalg.norm(q - q_goal_final) < tolerance:
 
         print(f"Reached goal at time {time/100}")
+        print(f"Total traveled distance: {total_distance:.3f}")
         #print(f"Reached goal at frame {frame}")
         ani.event_source.stop()
         return mystates
@@ -647,7 +763,9 @@ def update(frame,mystates):
     mystates["stop_counter"]          = stop_counter
     mystates["goals_achieved_so_far"] = goals_achieved_so_far
     mystates["rrt"]                   = rrt
-
+    mystates["full_geometric_polyline"] = full_geometric_polyline 
+    mystates["total_distance"]         = total_distance
+    
     #return []
     return mystates
     #return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot ,q, obstacle_speeds,ani,time,q_goal_final,q_goal,waypoints,obstacles_true,rectangle_speeds,rect_obstacles,obstacles_noisy,sigma,v_robot,path_data,path_line, robot_dot, true_scatter, noisy_scatter, goal_dot, ellipse_patches, rect_patches, expanded_rect_patches,ax, full_geometric_path, stop_counter

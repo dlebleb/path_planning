@@ -11,6 +11,7 @@ import random
 # Start & Goal
 q = np.array([-40.0, -40.0])
 q_goal = np.array([10.0, 12.0])
+#q_goal = np.array([0.0, 20.0])
 
 # humans modeled as elliptical obstacles
 obstacles_true = np.array([
@@ -80,7 +81,10 @@ waypoints = np.array([
     [25, -40],   
     [-48, 20],   
     [7, 30],      
-    [15, -2],     
+    [15, -2], 
+    [0, 0],
+    [-10, 0],
+    [-20, -20],    
 ])
 
 def rectangle_corners_center(rect):
@@ -468,7 +472,7 @@ def PSO_TSP(traveller_sm, START, END, WAYPOINTS,
 
     return gbest, gbest_cost
 
-best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
+best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=200, n_iter=120000)
 
 
 print("\nPSO RESULT")

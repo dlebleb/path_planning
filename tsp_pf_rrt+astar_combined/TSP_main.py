@@ -542,8 +542,8 @@ def main():
     #kalabalik platform
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
     # incorporate static size
-    a_base = a0 + sizes 
-    b_base = b0 + sizes
+    a_base = a0 * sizes 
+    b_base = b0 * sizes
 
     a = np.zeros(obstacles_true.shape[0])
     b = np.zeros(obstacles_true.shape[0])

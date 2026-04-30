@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import matplotlib.animation as animation
 from TSP_main import *
-#from rrt_planner_main import *
+from datetime import datetime
+
 # ===============================
 # TSP FUNCTIONS and SETUP
 # ===============================
@@ -65,9 +66,9 @@ def init_environment():
         [-48, 20],
         [7, 30],
         [15, -2],
-        [0, 0],
-        [-10, 0],
-        [-20, -20],
+        # [0, 5],
+        # [-10, 0],
+        # [-20, -20],
     ])
 
     return rect_obstacles, expanded_rects, eps_expanded_rects, waypoints
@@ -83,9 +84,9 @@ def init_environment_waypoints():
         [-48, 20],
         [7, 30],
         [15, -2],
-        [0, 0],
-        [-10, 0],
-        [-20, -20],
+        # [0, 5],
+        # [-10, 0],
+        # [-20, -20],
     ])
 
     return waypoints
@@ -214,7 +215,7 @@ def closest_point_and_tangent_on_polyline(q, full_geometric_path, q_goal, flag =
     return best_p, best_t_hat
 
 def pull_tangent_force(q, p, t_hat):
-    k_pull, k_tan = 15.0, 60.0
+    k_pull, k_tan = 15.0, 100.0 #60
     F_pull = -k_pull * (q - p)
     F_tan = k_tan * t_hat
     return F_pull + F_tan
@@ -224,8 +225,8 @@ def pull_tangent_force(q, p, t_hat):
 # FORCE FUNCTIONS
 # ===============================
 def attractive_force(q, q_goal):
-    k_att, k_rep, d0, dt = 60.0, 10.0, 10.0, 0.01 #default k_att is 10.
-    F_att = -k_att * (q - q_goal)
+    k_att, k_rep, d0, dt = 200.0, 10.0, 10.0, 0.01 #default k_att is 60.
+    F_att = -k_att * (q - q_goal)/np.linalg.norm(q-q_goal)
     return F_att
 
 def repulsive_force(q, obstacles_noisy, obstacle_speeds):
@@ -235,11 +236,13 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
+    #kalabalik platform
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
-    a_max = 7
-    b_max = 5
+    a_max = 3
+    b_max = 1.5
     k_att, k_rep, d0, dt = 10.0, 10.0, 1.0, 0.01 #d0 was 10.0
 
     F_rep_total = np.array([0.0, 0.0])
@@ -272,15 +275,15 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
 
         if dE < d0:
             if dE >= 0.5: 
-                F_mag = 0.02 #k_rep * (1/4 - 1/d0) * (1/4**2)
+                F_mag = 50 #k_rep * (1/4 - 1/d0) * (1/4**2) #0.04
                 #F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
                 # yön vektörü (normalize edilmiş fark)
-                grad_Dq = (q - obs) / (dE + 1e-12)
+                grad_Dq = (q - obs)/np.linalg.norm(q - obs)
                 # toplam kuvvet
                 F_rep = F_mag * grad_Dq
             else:
-                F_mag = 100 #k_rep * (1/0.1 - 1/d0) * (1/0.1**2) #F_mag is decreased tp 100 from 1000.
-                grad_Dq = (q - obs) / (dE + 1e-12)
+                F_mag = 400 #k_rep * (1/0.1 - 1/d0) * (1/0.1**2) #F_mag is decreased tp 100 from 1000.
+                grad_Dq = (q - obs)/np.linalg.norm(q - obs)
                 F_rep = F_mag * grad_Dq
 
         else:
@@ -289,7 +292,7 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     return F_rep_total
 
 def repulsive_force_rectangles(q, rect_obstacles):
-    k_rep_rectangle, d0 = 50.0, 20.0 #k_rep is changed to 50 to avoid collisions with rectangles
+    k_rep_rectangle, d0 = 50.0, 5.0 #k_rep is changed to 50 to avoid collisions with rectangles, d0 20.
 
     F_rep_total_rectangle = np.array([0.0, 0.0])
     for obs in rect_obstacles:
@@ -320,11 +323,13 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
+    #kalabalik platform
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
-    a_max = 7
-    b_max = 5
+    a_max = 3
+    b_max = 1.5
 
     U_rep_total = 0
     U_att = 0.5 * k_att * np.linalg.norm(q - q_goal)**2
@@ -452,11 +457,13 @@ def is_collision_check(q, obstacles_noisy, obstacle_speeds):
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
+    #kalabalik platform
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
-    a_max = 7
-    b_max = 5
+    a_max = 3
+    b_max = 1.5
 
     for i, obs in enumerate(obstacles_noisy):
         vx, vy = obstacle_speeds[i]
@@ -483,6 +490,7 @@ def is_collision_check(q, obstacles_noisy, obstacle_speeds):
         if dE < 0:
             counter += 1
             collided_indices.append(i)
+            print(dE)
     
     return counter, collided_indices
 
@@ -538,11 +546,13 @@ def update(frame,mystates):
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
+    #kalabalik platform
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
-    a_max = 7
-    b_max = 5
+    a_max = 3
+    b_max = 1.5
 
 
     time = time + 1
@@ -586,6 +596,8 @@ def update(frame,mystates):
 
     # --- 3) Robot force ---
     F = total_force(q, q_goal, obstacles_noisy, obstacle_speeds, rect_obstacles) # vektor toplami zaten sana yonu verir.
+    F_rep = repulsive_force(q,obstacles_noisy,obstacle_speeds)
+    F_att = attractive_force(q,q_goal)
 
     # new addition for the global path
     p, t_hat = closest_point_and_tangent_on_polyline(q, full_geometric_path, q_goal, flag = 0)
@@ -645,9 +657,12 @@ def update(frame,mystates):
         print(f"Total traveled distance: {total_distance:.3f}")
         mystates["total_distance"]         = total_distance
         mystates["collision_counter"]      = collision_counter
+        print_cost = total_distance + 100 * collision_counter
         mystates["done"] = True
         if ani is not None:
             ani.event_source.stop()
+            mytime = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plt.savefig(f"sim_result_{mytime}_{print_cost:.2f}.png", dpi=600, bbox_inches="tight")
         #ani.event_source.stop()
         return mystates
     
@@ -655,6 +670,8 @@ def update(frame,mystates):
     count, hits = is_collision_check(q, obstacles_noisy, obstacle_speeds)
     if count > 0:
         print("Collision detected with obstacle:", hits)
+        print(F,F_rep,F_att)
+        collision_counter += count
 
     #. check the collision with rectangles
     for rect in rect_obstacles:

@@ -9,19 +9,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import matplotlib.animation as animation
-from TSP_Rachel import Point
 from TSP_main import *
-from rrt_planner_main import *
 from datetime import datetime
+from damla_Astar import *
+from TSP_Rachel import Point
+from rrt_planner_main import RRTPlanner
+
 # ===============================
 # TSP FUNCTIONS and SETUP
 # ===============================
-def init(path_line,robot_dot,true_scatter,noisy_scatter, goal_dot):
-    path_line.set_data([], [])
-    robot_dot.set_data([], [])
+def init(path_line_rrt,path_line_astar,robot_dot_rrt,robot_dot_astar,true_scatter,noisy_scatter, goal_dot):
+    path_line_rrt.set_data([], [])
+    robot_dot_rrt.set_data([], [])
+    path_line_astar.set_data([], [])
+    robot_dot_astar.set_data([], [])
     true_scatter.set_offsets(np.empty((0, 2)))
     noisy_scatter.set_offsets(np.empty((0, 2)))
-    return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot
+    return path_line_rrt, path_line_astar,robot_dot_rrt, robot_dot_astar,true_scatter, noisy_scatter, goal_dot
 
 def init_environment():
     """
@@ -148,6 +152,7 @@ def extract_polyline(full_geometric_path, waypoints):
 
     return np.array(polyline)
 
+
 # new function for calculating the projection of q on the closest line segment coming from the global path
 # t = AQ nun AB uzerindeki projection'in uzunlugu / AB nin uzunlugu 
 
@@ -163,7 +168,7 @@ def closest_point_and_tangent_on_polyline(q, full_geometric_path, q_goal, flag =
       seg_idx: projeksiyonun düştüğü segment index'i
       t_clamped: float, AQ projeksiyon AB segment'inde nereye denk geliyor? (between 0 and 1)
     """
-    P = full_geometric_path
+    P = np.array(full_geometric_path)
 
     best_d = float("inf")
     best_p = None
@@ -216,16 +221,17 @@ def closest_point_and_tangent_on_polyline(q, full_geometric_path, q_goal, flag =
     return best_p, best_t_hat
 
 def pull_tangent_force(q, p, t_hat):
-    k_pull, k_tan = 15.0, 60.0
+    k_pull, k_tan = 15.0, 60.0 
     F_pull = -k_pull * (q - p)
     F_tan = k_tan * t_hat
     return F_pull + F_tan
+
 
 # ===============================
 # FORCE FUNCTIONS
 # ===============================
 def attractive_force(q, q_goal):
-    k_att, k_rep, d0, dt = 100.0, 10.0, 10.0, 0.01 #k_att was previously 10.0, 20.0 (last), 60.0 yerine arttitrabiliriz?
+    k_att, k_rep, d0, dt = 100.0, 10.0, 10.0, 0.01 #default k_att is 60.
     F_att = -k_att * (q - q_goal)/np.linalg.norm(q-q_goal)
     return F_att
 
@@ -239,28 +245,28 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     #kalabalik platform
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
     # extra kalabalik platform
-    sizes = np.array([
-    1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0,
-    1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8,
-    1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0,
+    # sizes = np.array([
+    # 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0,
+    # 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8,
+    # 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0,
 
-    # extra 20
-    1.3, 1.7, 1.1, 1.4, 0.9,
-    1.6, 1.2, 1.0, 1.5, 1.8,
-    2.0, 1.7, 1.3, 1.6, 1.2,
-    0.9, 1.4, 1.1, 1.9, 1.5
-    ])
-    extra_sizes_cluster = np.array([
-    1.6, 1.4, 1.8, 1.5, 1.7, 1.3,
-    1.9, 1.5, 1.6, 1.8, 1.4, 1.7
-    ])
-    sizes = np.concatenate((sizes, extra_sizes_cluster))
+    # # extra 20
+    # 1.3, 1.7, 1.1, 1.4, 0.9,
+    # 1.6, 1.2, 1.0, 1.5, 1.8,
+    # 2.0, 1.7, 1.3, 1.6, 1.2,
+    # 0.9, 1.4, 1.1, 1.9, 1.5
+    # ])
+    # extra_sizes_cluster = np.array([
+    # 1.6, 1.4, 1.8, 1.5, 1.7, 1.3,
+    # 1.9, 1.5, 1.6, 1.8, 1.4, 1.7
+    # ])
+    # sizes = np.concatenate((sizes, extra_sizes_cluster))
     # incorporate static size                          
     a_base = a0 * sizes 
     b_base = b0 * sizes
-    a_max = 3 #7metre
-    b_max = 1.5 #5metre
-    k_att, k_rep, d0, dt = 10.0, 10.0, 1.0, 0.01 #d0 was 10.0, 5.0
+    a_max = 3
+    b_max = 1.5
+    k_att, k_rep, d0, dt = 10.0, 10.0, 1.0, 0.01 #d0 was 10.0
 
     F_rep_total = np.array([0.0, 0.0])
     for i, obs in enumerate(obstacles_noisy):
@@ -290,36 +296,16 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
         # dynamic avoidance boundary
         # d0_i = d0 * max(a, b)
 
-        # diff = np.array([q[0]-obs_x, q[1]-obs_y])
-        # norm = np.linalg.norm(diff) + 1e-12
-
-        # # ellipse normalized coords
-        # qx = diff[0]/a
-        # qy = diff[1]/b
-        # dE = np.sqrt(qx**2 + qy**2) - 1
-
-        # if dE < d0:
-        #     grad = np.array([qx/(a), qy/(b)])
-        #     grad = grad / (np.linalg.norm(grad) + 1e-12)
-
-        #     F_mag = k_rep * (1/(dE+1e-6) - 1/d0) * (1/(dE+1e-6)**2)
-        #     F_rep = F_mag * grad
-        # else:
-        #     F_rep = np.zeros(2)
-
         if dE < d0:
             if dE >= 0.5: 
-                F_mag = 0.04 #k_rep * (1/4 - 1/d0) * (1/4**2) # normalde 0.02
+                F_mag = 0.04 #k_rep * (1/4 - 1/d0) * (1/4**2) #0.04
                 #F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
                 # yön vektörü (normalize edilmiş fark)
-                #grad_Dq = (q - obs) / (dE + 1e-12)
                 grad_Dq = (q - obs)/np.linalg.norm(q - obs)
                 # toplam kuvvet
                 F_rep = F_mag * grad_Dq
             else:
-                F_mag = 400 #k_rep * (1/0.1 - 1/d0) * (1/0.1**2) # normalde 200
-                # #grad_Dq = (q - obs) / (dE + 1e-12)
-                #F_mag = k_rep * (1/dE - 1/d0) * (1/dE**2)
+                F_mag = 400 #k_rep * (1/0.1 - 1/d0) * (1/0.1**2) #F_mag is decreased tp 100 from 1000.
                 grad_Dq = (q - obs)/np.linalg.norm(q - obs)
                 F_rep = F_mag * grad_Dq
 
@@ -329,7 +315,7 @@ def repulsive_force(q, obstacles_noisy, obstacle_speeds):
     return F_rep_total
 
 def repulsive_force_rectangles(q, rect_obstacles):
-    k_rep_rectangle, d0 = 50.0, 20.0 #50 ve 20
+    k_rep_rectangle, d0 = 50.0, 20.0 #k_rep is changed to 50 to avoid collisions with rectangles, d0 20.
 
     F_rep_total_rectangle = np.array([0.0, 0.0])
     for obs in rect_obstacles:
@@ -347,7 +333,6 @@ def repulsive_force_rectangles(q, rect_obstacles):
             grad_Dq = (q - center) / (dE + 1e-12)
             # toplam kuvvet
             F_rep = F_mag * grad_Dq
-
         else:
             F_rep = np.array([0.0, 0.0])
         F_rep_total_rectangle += F_rep
@@ -360,7 +345,7 @@ def potential(q, q_goal, obstacles_noisy, obstacle_speeds):
     alpha = 0.2   # major scaling (large)
     beta  = 0.1   # minor scaling (small)
     # each obstacle has a size factor: 1 = normal, >1 = large, <1 = small
-    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9])
+    sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8])
     #kalabalik platform
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
     # extra kalabalik platform
@@ -562,6 +547,7 @@ def is_collision_check(q, obstacles_noisy, obstacle_speeds):
         if dE < 0:
             counter += 1
             collided_indices.append(i)
+            print(dE)
     
     return counter, collided_indices
 
@@ -573,12 +559,14 @@ def update(frame,mystates):
 #            v_robot,path_data,path_line, robot_dot, true_scatter, noisy_scatter, goal_dot, ellipse_patches, rect_patches, expanded_rect_patches,
 #            ax,expanded_rects, eps_expanded_rects, full_geometric_path,stop_counter):
     #from TSP import bestPath,build_tsp_indices,PSO_TSP,build_full_geometric_path
-    q                     = mystates["q"]
+    q_rrt                 = mystates["q_rrt"]
+    q_astar               = mystates["q_astar"]
     obstacle_speeds       = mystates["obstacle_speeds"]
     ani                   = mystates["ani"]
     time                  = mystates["time"]
     q_goal_final          = mystates["q_goal_final"]
-    q_goal                = mystates["q_goal"]
+    q_goal_rrt            = mystates["q_goal_rrt"]
+    q_goal_astar          = mystates["q_goal_astar"]
     waypoints             = mystates["waypoints"]
     obstacles_true        = mystates["obstacles_true"]
     rectangle_speeds      = mystates["rectangle_speeds"]
@@ -586,9 +574,12 @@ def update(frame,mystates):
     obstacles_noisy       = mystates["obstacles_noisy"]
     sigma                 = mystates["sigma"]
     v_robot               = mystates["v_robot"]
-    path_data             = mystates["path_data"]
-    path_line             = mystates["path_line"]
-    robot_dot             = mystates["robot_dot"]
+    path_data_rrt         = mystates["path_data_rrt"]
+    path_data_astar       = mystates["path_data_astar"]
+    path_line_rrt         = mystates["path_line_rrt"]
+    path_line_astar       = mystates["path_line_astar"]
+    robot_dot_rrt         = mystates["robot_dot_rrt"]
+    robot_dot_astar       = mystates["robot_dot_astar"]
     true_scatter          = mystates["true_scatter"]
     noisy_scatter         = mystates["noisy_scatter"]
     goal_dot              = mystates["goal_dot"]
@@ -598,14 +589,25 @@ def update(frame,mystates):
     ax                    = mystates["ax"]
     expanded_rects        = mystates["expanded_rects"]
     eps_expanded_rects    = mystates["eps_expanded_rects"]
-    full_geometric_path   = mystates["full_geometric_path"]
-    stop_counter          = mystates["stop_counter"]
-    goals_achieved_so_far = mystates["goals_achieved_so_far"]
-    rrt                   = mystates["rrt"]
-    full_geometric_polyline = mystates["full_geometric_polyline"]
-    total_distance        = mystates["total_distance"]
-    collision_counter     = mystates["collision_counter"]
-    done                  = mystates["done"]
+    full_geometric_path_rrt       = mystates["full_geometric_path_rrt"]
+    full_geometric_path_astar     = mystates["full_geometric_path_astar"]
+    stop_counter_rrt              = mystates["stop_counter_rrt"]
+    stop_counter_astar            = mystates["stop_counter_astar"]
+    goals_achieved_so_far_rrt     = mystates["goals_achieved_so_far_rrt"]
+    goals_achieved_so_far_astar   = mystates["goals_achieved_so_far_astar"]
+    rrt                           = mystates["rrt"]
+    full_geometric_polyline_rrt   = mystates["full_geometric_polyline_rrt"]
+    full_geometric_polyline_astar = mystates["full_geometric_polyline_astar"]
+    total_distance_rrt            = mystates["total_distance_rrt"]
+    total_distance_astar          = mystates["total_distance_astar"]
+    collision_counter_rrt         = mystates["collision_counter_rrt"]
+    collision_counter_astar       = mystates["collision_counter_astar"]
+    done                        = mystates["done"]
+    done_rrt                    = mystates["done_rrt"]
+    done_astar                  = mystates["done_astar"]
+    finish_counter_rrt        = mystates["finish_counter_rrt"]
+    finish_counter_astar      = mystates["finish_counter_astar"]
+
 
     #path_line,robot_dot,true_scatter,noisy_scatter, goal_dot = init(path_line,robot_dot,true_scatter,noisy_scatter, goal_dot)
     tolerance = 1
@@ -643,26 +645,32 @@ def update(frame,mystates):
 
 
     time = time + 1
-    if (time % 1000 == 0): ## path is updated every 1s.
-        #q_goal = tsp()
+    if (time % 1000 == 0): ## path is updated every 10s.
         # initialize the waypoints again 
-        #rect_obstacles, expanded_rects, eps_expanded_rects, waypoints = init_environment()
         waypoints = init_environment_waypoints()
         
         # remove visited waypoints from the waypoint list
-        waypoints = remove_visited_waypoints(waypoints,goals_achieved_so_far, tol = tolerance)
+        waypoints_rrt   = remove_visited_waypoints(waypoints,goals_achieved_so_far_rrt, tol = tolerance)
+        waypoints_astar = remove_visited_waypoints(waypoints,goals_achieved_so_far_astar, tol = tolerance)
 
-        traveller_sm, route_sm = bestPath(waypoints, q, q_goal_final, rect_obstacles, expanded_rects, eps_expanded_rects)
-        N, START, END, WAYPOINTS, nodes = build_tsp_indices(q, q_goal_final, waypoints)
-        best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=250, n_iter=5000)
-        full_geometric_path = build_full_geometric_path(best_path,route_sm)
-        full_geometric_polyline = extract_polyline(full_geometric_path, waypoints)
-        
+        traveller_sm, route_sm = bestPath(waypoints_rrt, q_rrt, q_goal_final, rect_obstacles, expanded_rects, eps_expanded_rects)
+        N, START, END, WAYPOINTS, nodes = build_tsp_indices(q_rrt, q_goal_final, waypoints_rrt)
+        best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
+        full_geometric_path_rrt = build_full_geometric_path(best_path,route_sm)
+        full_geometric_polyline_rrt = extract_polyline(full_geometric_path_rrt, waypoints_rrt)
+
+        traveller_sm, route_sm = bestPath(waypoints_astar, q_astar, q_goal_final, rect_obstacles, expanded_rects, eps_expanded_rects)
+        N, START, END, WAYPOINTS, nodes = build_tsp_indices(q_astar, q_goal_final, waypoints_astar)
+        best_path, best_cost = PSO_TSP(traveller_sm, START=START, END=END, WAYPOINTS=WAYPOINTS, n_particles=500, n_iter=300)
+        full_geometric_path_astar = build_full_geometric_path(best_path,route_sm)
+        full_geometric_polyline_astar = extract_polyline(full_geometric_path_astar, waypoints_astar)
+
         # RESET HERE
-        stop_counter = 0
+        stop_counter_rrt   = 0
+        stop_counter_astar = 0
 
-        #q_goal = full_geometric_path[3+stop_counter]
-        q_goal = full_geometric_polyline[2+stop_counter]
+        q_goal_rrt   = full_geometric_polyline_rrt[2+stop_counter_rrt]
+        q_goal_astar = full_geometric_polyline_astar[2+stop_counter_astar]
 
     # 0) random maneuver (new speeds)
     obstacle_speeds = apply_stochastic_maneuver(obstacle_speeds)
@@ -683,119 +691,233 @@ def update(frame,mystates):
     obstacles_noisy[:] = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 
     # --- 3) Robot force ---
-    F = total_force(q, q_goal, obstacles_noisy, obstacle_speeds, rect_obstacles) # vektor toplami zaten sana yonu verir.
-    F1 = repulsive_force(q,obstacles_noisy,obstacle_speeds) + repulsive_force_rectangles(q,rect_obstacles)
+    F_rrt     = total_force(q_rrt, q_goal_rrt, obstacles_noisy, obstacle_speeds, rect_obstacles) # vektor toplami zaten sana yonu verir.
+    F1 = repulsive_force(q_rrt,obstacles_noisy,obstacle_speeds) + repulsive_force_rectangles(q_rrt,rect_obstacles)
+   
+    F_astar     = total_force(q_astar, q_goal_astar, obstacles_noisy, obstacle_speeds, rect_obstacles) # vektor toplami zaten sana yonu verir.
 
     # new addition for the global path
-    p, t_hat = closest_point_and_tangent_on_polyline(q, full_geometric_path, q_goal, flag = 0)
-    F = F + pull_tangent_force(q, p, t_hat)
+    p_rrt, t_hat_rrt = closest_point_and_tangent_on_polyline(q_rrt, full_geometric_path_rrt, q_goal_rrt, flag = 0)
+    p_astar, t_hat_astar = closest_point_and_tangent_on_polyline(q_astar, full_geometric_path_astar, q_goal_astar, flag = 0)
+    F_rrt = F_rrt + pull_tangent_force(q_rrt, p_rrt, t_hat_rrt)
+    F_astar = F_astar + pull_tangent_force(q_astar, p_astar, t_hat_astar)
 
     # --- 4) Robot motion ---
-    F_norm = np.linalg.norm(F)
+    # ================= RRT MOTION =================
+    if not done_rrt:
 
-    # Fmax = 100  # örnek
+        F_rrt_norm = np.linalg.norm(F_rrt)
 
-    # if F_norm > Fmax:
-    #     F = F / F_norm * Fmax
-    
-    if F_norm < 1e-8:
-        direction = np.zeros_like(F)
-    else:
-        direction = F / F_norm
+        if F_rrt_norm < 1e-8:
+            direction_rrt = np.zeros_like(F_rrt)
+        else:
+            direction_rrt = F_rrt / F_rrt_norm
 
-    q_old = q.copy()
-    L = 1.0   # local horizon
-    q_target_local = q + L * direction * 0.5 # added 0.3 recently and it seems to be better
+        q_old_rrt = q_rrt.copy()
 
-    rrt_path = rrt.plan_path(
-        start = Point(q[0],q[1]),
-        goal = Point(q_target_local[0], q_target_local[1]),
-        obstacles_noisy=obstacles_noisy,
-        rect_obstacles=rect_obstacles,
-        obstacle_speeds=obstacle_speeds,
-        F=F1,
-        expanded_rects=expanded_rects
-    )
+        L_rrt = 1.0
+        q_target_local_rrt = q_rrt + L_rrt * direction_rrt * 0.5
 
-    if rrt_path is not None and len(rrt_path) > 1:
-       
-        rrt_path = rrt.smooth_moving_average(rrt_path)
-        
-        target = np.array([rrt_path[1].x, rrt_path[1].y])
-        vector_to_target = target - q
-        dist = np.linalg.norm(vector_to_target)
-        q_new = q + v_robot*dt * vector_to_target/dist
-        p1 = Point(q[0], q[1])
-        p2 = Point(q_new[0], q_new[1])
-        if not rrt._is_path_clear(p1,p2,obstacles_noisy,obstacle_speeds):
-            q_new = np.array([rrt_path[1].x,rrt_path[1].y])
-        #q = q + min(v_robot*dt,dist) * vector_to_target/dist
-        q = q_new
-        #q = np.array([rrt_path[1].x,rrt_path[1].y])
+        rrt_path = rrt.plan_path(
+            start=Point(q_rrt[0], q_rrt[1]),
+            goal=Point(q_target_local_rrt[0], q_target_local_rrt[1]),
+            obstacles_noisy=obstacles_noisy,
+            rect_obstacles=rect_obstacles,
+            obstacle_speeds=obstacle_speeds,
+            F=F1,
+            expanded_rects=expanded_rects
+        )
 
-    else:
-        # fallback APF micro step
-        #q = q + rrt.step_size * direction
-        q = q + min(v_robot*dt, rrt.step_size) * direction
-        #q[:] = q + direction * v_robot * dt # rrt varken 1.2 ve 0.8 yap. 
+        if rrt_path is not None and len(rrt_path) > 1:
 
-    path_data.append(q.copy())
-    step_distance = np.linalg.norm(q - q_old)
-    total_distance += step_distance
+            rrt_path = rrt.smooth_moving_average(rrt_path)
+
+            target_rrt = np.array([rrt_path[1].x, rrt_path[1].y])
+            vector_to_target_rrt = target_rrt - q_rrt
+            dist_rrt = np.linalg.norm(vector_to_target_rrt)
+
+            q_new = q_rrt + v_robot * dt * vector_to_target_rrt / dist_rrt
+
+            p1 = Point(q_rrt[0], q_rrt[1])
+            p2 = Point(q_new[0], q_new[1])
+
+            if not rrt._is_path_clear(p1, p2, obstacles_noisy, obstacle_speeds):
+                q_new = np.array([rrt_path[1].x, rrt_path[1].y])
+
+            q_rrt = q_new
+
+        else:
+            q_rrt = q_rrt + min(v_robot * dt, rrt.step_size) * direction_rrt
+
+        path_data_rrt.append(q_rrt.copy())
+
+        step_distance_rrt = np.linalg.norm(q_rrt - q_old_rrt)
+        total_distance_rrt += step_distance_rrt
+
+
+   # ================= ASTAR MOTION =================
+    if not done_astar:
+
+        F_astar_norm = np.linalg.norm(F_astar)
+
+        if F_astar_norm < 1e-8:
+            direction_astar = np.zeros_like(F_astar)
+        else:
+            direction_astar = F_astar / F_astar_norm
+
+        q_old_astar = q_astar.copy()
+
+        L_astar = 3.0
+        q_target_local_astar = q_astar + L_astar * direction_astar
+
+        xmin, xmax = q_astar[0]-5, q_astar[0]+5
+        ymin, ymax = q_astar[1]-5, q_astar[1]+5
+
+        q_target_local_astar = np.clip(q_target_local_astar, [xmin, ymin], [xmax, ymax])
+
+        astar_path = astar_local(
+            start_state=tuple(q_astar),
+            goal_state=tuple(q_target_local_astar),
+            heuristic_func=euclidean_distance,
+            successors_func=successors,
+            obstacles_noisy=obstacles_noisy,
+            obstacle_speeds=obstacle_speeds,
+            rect_obstacles=rect_obstacles,
+            bounds=(xmin, xmax, ymin, ymax),
+            step=0.5
+        )
+
+        if astar_path is not None and len(astar_path) > 1:
+
+            target_astar = np.array([astar_path[1][0], astar_path[1][1]])
+            vector_to_target_astar = target_astar - q_astar
+            dist_astar = np.linalg.norm(vector_to_target_astar)
+
+            if dist_astar > 1e-8:
+                q_astar = q_astar + v_robot * dt * vector_to_target_astar / dist_astar
+            else:
+                q_astar = q_astar
+
+        else:
+            print("A* failed to find path")
+            q_astar = q_astar + v_robot * dt * direction_astar
+
+        path_data_astar.append(q_astar.copy())
+
+        step_distance_astar = np.linalg.norm(q_astar - q_old_astar)
+        total_distance_astar += step_distance_astar
+
 
     # --- STOP CONDITION: close enough to goal ---
 
     # INTERMEDIATE GOALS ONLY
-    if np.linalg.norm(q - q_goal) < tolerance: # if arrives at at a stop
-        print(f"I've arrived at stop {stop_counter}")
-        goals_achieved_so_far.append(q_goal)
-        stop_counter = stop_counter + 1 
-        #q_goal = full_geometric_path[3+stop_counter]
-        if np.all(q_goal == q_goal_final):
-            pass
-        else:
-            q_goal = full_geometric_polyline[2+stop_counter]
-        # next_idx = 2 + stop_counter
-        # if next_idx < len(full_geometric_path):
-        #     q_goal = full_geometric_path[next_idx]
-        # else:
-        #     q_goal = q_goal_final.copy()
+    if not done_rrt:
+        if np.linalg.norm(q_rrt - q_goal_rrt) < tolerance: # if arrives at at a stop
+            print(f"I've arrived at stop with RRT {stop_counter_rrt}")
+            goals_achieved_so_far_rrt.append(q_goal_rrt)
+            stop_counter_rrt = stop_counter_rrt + 1 
+            if np.all(q_goal_rrt == q_goal_final):
+                pass
+            else:
+                q_goal_rrt = full_geometric_polyline_rrt[2+stop_counter_rrt]
 
-    # FINAL GOAL
-    if np.linalg.norm(q - q_goal_final) < tolerance and np.allclose(q_goal, q_goal_final): # YANLISLIKLA GOAL'E GIRMEYECEK
+    if not done_astar:
+        if np.linalg.norm(q_astar - q_goal_astar) < tolerance: # if arrives at at a stop
+            print(f"I've arrived at stop with Astar {stop_counter_astar}")
+            goals_achieved_so_far_astar.append(q_goal_astar)
+            stop_counter_astar = stop_counter_astar + 1 
+            if np.all(q_goal_astar == q_goal_final):
+                pass
+            else:
+                q_goal_astar = full_geometric_polyline_astar[2+stop_counter_astar]
 
-        print(f"Reached goal at time {time/100}")
-        print(f"Total traveled distance: {total_distance:.3f}")
-        #print(f"Reached goal at frame {frame}")
-        mystates["total_distance"]         = total_distance
-        mystates["collision_counter"]      = collision_counter
-        print_cost = total_distance + 100 * collision_counter
+    
+    # ===== RRT FINAL GOAL =====
+    if (not done_rrt and
+        np.linalg.norm(q_rrt - q_goal_final) < tolerance and
+        np.allclose(q_goal_rrt, q_goal_final)):
+
+        if finish_counter_rrt == 0:
+            print(f"Reached goal with RRT at time {time/100}")
+            print(f"Total traveled distance (RRT): {total_distance_rrt:.3f}")
+            done_rrt = True
+            mystates["distance_rrt"] = total_distance_rrt
+            mystates["collision_rrt"] = collision_counter_rrt
+        finish_counter_rrt += 1
+
+    # ===== ASTAR FINAL GOAL =====
+    if (not done_astar and
+        np.linalg.norm(q_astar - q_goal_final) < tolerance and
+        np.allclose(q_goal_astar, q_goal_final)):
+        
+        if finish_counter_astar == 0:
+            print(f"Reached goal with A* at time {time/100}")
+            print(f"Total traveled distance (A*): {total_distance_astar:.3f}")
+            done_astar = True
+            mystates["distance_astar"] = total_distance_astar
+            mystates["collision_astar"] = collision_counter_astar
+        finish_counter_astar += 1
+
+    # ===== FINAL GOAL =====
+    if done_rrt and done_astar:
+
+        cost_rrt = total_distance_rrt + 100 * collision_counter_rrt
+        cost_astar = total_distance_astar + 100 * collision_counter_astar
+
+        mystates["cost_rrt"] = cost_rrt
+        mystates["cost_astar"] = cost_astar
+
         mystates["done"] = True
+
         if ani is not None:
             ani.event_source.stop()
+
             mytime = datetime.now().strftime("%Y%m%d_%H%M%S")
-            plt.savefig(f"sim_result_{mytime}_{print_cost:.2f}.png", dpi=600, bbox_inches="tight")
-        #ani.event_source.stop() 
+
+            plt.savefig(
+                f"sim_result_rrt_{cost_rrt:.2f}_astar_{cost_astar:.2f}_{mytime}.png",
+                dpi=600,
+                bbox_inches="tight"
+            )
+
         return mystates
-        #return []
     
-    #. check the collision
-    count, hits = is_collision_check(q, obstacles_noisy, obstacle_speeds)
-    if count > 0:
-        print("Collision detected with obstacle:", hits)
-        print(F,q_target_local,q,F1,rrt_path)
-        collision_counter += count
+    #. check the collision for the RRT path
+    if not done_rrt:
 
-    #. check the collision with rectangles
-    for rect in rect_obstacles:
-        if point_in_rect(q, rect):
-            print("Collision detected with rectangle:", rect)
-            collision_counter += 1
+        count, hits = is_collision_check(q_rrt, obstacles_noisy, obstacle_speeds)
 
+        if count > 0:
+            print("Collision detected with obstacle RRT:", hits)
+            collision_counter_rrt += count
+
+        for rect in rect_obstacles:
+            if point_in_rect(q_rrt, rect):
+                print("Collision detected with rectangle RRT:", rect)
+                collision_counter_rrt += 1
+    
+    #. check the collision for the Astar path
+    if not done_astar:
+
+        count, hits = is_collision_check(q_astar, obstacles_noisy, obstacle_speeds)
+
+        if count > 0:
+            print("Collision detected with obstacle Astar:", hits)
+            collision_counter_astar += count
+
+        for rect in rect_obstacles:
+            if point_in_rect(q_astar, rect):
+                print("Collision detected with rectangle Astar:", rect)
+                collision_counter_astar += 1
+    
     # --- 5) Update path ---
-    arr = np.array(path_data)
-    path_line.set_data(arr[:,0], arr[:,1])
-    robot_dot.set_data([q[0]], [q[1]])
+    arr_rrt = np.array(path_data_rrt)
+    path_line_rrt.set_data(arr_rrt[:,0], arr_rrt[:,1])
+    robot_dot_rrt.set_data([q_rrt[0]], [q_rrt[1]])
+
+    arr_astar = np.array(path_data_astar)
+    path_line_astar.set_data(arr_astar[:,0], arr_astar[:,1])
+    robot_dot_astar.set_data([q_astar[0]], [q_astar[1]])
 
     # --- 6) Obstacle scatter ---
     true_scatter.set_offsets(obstacles_true)
@@ -831,10 +953,6 @@ def update(frame,mystates):
         ax.add_patch(ellipse)
         ellipse_patches.append(ellipse)
 
-    # Waypointleri mor yıldız olarak çiz
-    ax.scatter(waypoints[:,0], waypoints[:,1],
-    color='purple', marker='*', s=120, label="Stations")
-    
     # --- Remove old rectangles ---
     for r in rect_patches:
         r.remove()
@@ -859,12 +977,14 @@ def update(frame,mystates):
         expanded_rect_patches.append(rect2)
 
     print(f"Time: {time/100} s.")
-    mystates["q"]                     = q
+    mystates["q_rrt"]                 = q_rrt
+    mystates["q_astar"]               = q_astar
     mystates["obstacle_speeds"]       = obstacle_speeds
     mystates["ani"]                   = ani
     mystates["time"]                  = time
     mystates["q_goal_final"]          = q_goal_final
-    mystates["q_goal"]                = q_goal
+    mystates["q_goal_rrt"]            = q_goal_rrt
+    mystates["q_goal_astar"]          = q_goal_astar
     mystates["waypoints"]             = waypoints
     mystates["obstacles_true"]        = obstacles_true
     mystates["rectangle_speeds"]      = rectangle_speeds
@@ -872,9 +992,12 @@ def update(frame,mystates):
     mystates["obstacles_noisy"]       = obstacles_noisy
     mystates["sigma"]                 = sigma
     mystates["v_robot"]               = v_robot
-    mystates["path_data"]             = path_data
-    mystates["path_line"]             = path_line
-    mystates["robot_dot"]             = robot_dot
+    mystates["path_data_rrt"]         = path_data_rrt
+    mystates["path_data_astar"]       = path_data_astar
+    mystates["path_line_rrt"]         = path_line_rrt
+    mystates["path_line_astar"]       = path_line_astar
+    mystates["robot_dot_rrt"]         = robot_dot_rrt
+    mystates["robot_dot_astar"]       = robot_dot_astar
     mystates["true_scatter"]          = true_scatter
     mystates["noisy_scatter"]         = noisy_scatter
     mystates["goal_dot"]              = goal_dot
@@ -884,15 +1007,23 @@ def update(frame,mystates):
     mystates["ax"]                    = ax
     mystates["expanded_rects"]        = expanded_rects
     mystates["eps_expanded_rects"]    = eps_expanded_rects
-    mystates["full_geometric_path"]   = full_geometric_path
-    mystates["stop_counter"]          = stop_counter
-    mystates["goals_achieved_so_far"] = goals_achieved_so_far
+    mystates["full_geometric_path_rrt"]     = full_geometric_path_rrt
+    mystates["full_geometric_path_astar"]   = full_geometric_path_astar
+    mystates["stop_counter_rrt"]            = stop_counter_rrt
+    mystates["stop_counter_astar"]          = stop_counter_astar
+    mystates["goals_achieved_so_far_rrt"]   = goals_achieved_so_far_rrt
+    mystates["goals_achieved_so_far_astar"] = goals_achieved_so_far_astar
     mystates["rrt"]                   = rrt
-    mystates["full_geometric_polyline"] = full_geometric_polyline 
-    mystates["total_distance"]         = total_distance
-    mystates["collision_counter"]      = collision_counter
+    mystates["full_geometric_polyline_rrt"]   = full_geometric_polyline_rrt
+    mystates["full_geometric_polyline_astar"] = full_geometric_polyline_astar
+    mystates["total_distance_rrt"]         = total_distance_rrt
+    mystates["total_distance_astar"]       = total_distance_astar
+    mystates["collision_counter_rrt"]      = collision_counter_rrt
+    mystates["collision_counter_astar"]    = collision_counter_astar
     mystates["done"]                   = done
+    mystates["done_rrt"]               = done_rrt
+    mystates["done_astar"]             = done_astar
+    mystates["finish_counter_rrt"]     = finish_counter_rrt
+    mystates["finish_counter_astar"]   = finish_counter_astar
 
-    #return []
     return mystates
-    #return path_line, robot_dot, true_scatter, noisy_scatter, goal_dot ,q, obstacle_speeds,ani,time,q_goal_final,q_goal,waypoints,obstacles_true,rectangle_speeds,rect_obstacles,obstacles_noisy,sigma,v_robot,path_data,path_line, robot_dot, true_scatter, noisy_scatter, goal_dot, ellipse_patches, rect_patches, expanded_rect_patches,ax, full_geometric_path, stop_counter

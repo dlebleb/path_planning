@@ -1,8 +1,8 @@
 from run_simulation import run_simulation
 import numpy as np
 from TSP_main import bestPath, build_tsp_indices, PSO_TSP, build_full_geometric_path
-from rrt_planner_main import RRTPlanner
-from APF5 import extract_polyline, init_environment
+from run_simulation import run_simulation
+from APF_Astar import extract_polyline, init_environment
 # ===============================
 # INITIAL SETUP
 # ===============================
@@ -38,14 +38,12 @@ cluster2 = np.array([
 [17, -40]
 ])
 obstacles_true = np.vstack((obstacles_true, extra_obstacles,cluster1,cluster2))
-
 sigma               = 0.1  # 10 cm uncertainity
 obstacles_noisy     = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 # obstacle speeds
 obstacle_speeds     = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1]])
 # kalabalik platform
 obstacle_speeds     = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1],[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1]])
-
 # extra kalabalik platform
 extra_speeds = np.array([
 [-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1],
@@ -83,7 +81,6 @@ rect_obstacles, expanded_rects, eps_expanded_rects, waypoints = init_environment
 rectangle_speeds = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1]])
 rectangle_speeds = rectangle_speeds * 0
 
-rrt = RRTPlanner(step_size=0.3, max_iterations=2000) #step_size was 0.15 when L was chosen as 0.3.
 
 # ===============================
 # ANIMATION SETUP
@@ -145,7 +142,6 @@ for i in range(N_MC):
     [q.copy()],   # fresh path_data
     full_geometric_path.copy(),
     full_geometric_polyline.copy(),
-    RRTPlanner(step_size=0.3, max_iterations=2000),  # fresh planner
     enable_animation=True
 )
     distances.append(d)

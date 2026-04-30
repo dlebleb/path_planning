@@ -23,11 +23,15 @@ q                   = np.array([-40.0, -40.0])
 v_robot             = 30 #25 #30
 # obstacle coordinates 
 obstacles_true      = np.array([[-18.0,-10.0], [18,-20], [18, 8], [22,26], [23,15], [-23,15], [5,5], [-40, -30], [15, -10], [10, 5], [-30, 0], [-20, -20], [0, 0], [-35, 3], [-26, -27], [2, -10]])
+# kalabalik platform
+obstacles_true      = np.array([[-18.0,-10.0], [18,-20], [18, 8], [22,26], [23,15], [-23,15], [5,5], [-40, -30], [15, -10], [10, 5], [-30, 0], [-20, -20], [0, 0], [-35, 3], [-26, -27], [2, -10], [11, -12], [-3, -3], [-45, 0], [-25, -25], [8, 10], [-35, 13], [-21, -17], [21, -10]])
 sigma               = 0.1  # 10 cm uncertainity
 obstacles_noisy     = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
 # obstacle speeds
 obstacle_speeds     = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1]])
-obstacle_speeds     = obstacle_speeds * 80
+# kalabalik platform
+obstacle_speeds     = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1],[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1]])
+
 vmag_max            = 24.5
 vmag_min            = 5
 # APF parameters
@@ -89,6 +93,8 @@ stop_counter    = 0
 ani             = None
 goals_achieved_so_far = []
 total_distance = 0
+collision_counter = 0
+done = False
 mystates = {
     "q": q,
     "obstacle_speeds": obstacle_speeds,
@@ -120,7 +126,9 @@ mystates = {
     "goals_achieved_so_far": goals_achieved_so_far,
     #"rrt": rrt
     "full_geometric_polyline": full_geometric_polyline,
-    "total_distance": total_distance}
+    "total_distance": total_distance,
+    "collision_counter": collision_counter,
+    "done": done}
 
 def init_anim():
     return init(path_line, robot_dot, true_scatter, noisy_scatter, goal_dot)

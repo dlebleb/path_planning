@@ -1,7 +1,7 @@
 import heapq #h[0] her zaman minimumdur. h[1], h[2], h[3] sıralı değildir.
 import numpy as np
 import math
-from APF3_Astar import init_environment
+from APF_RRT_Astar import init_environment
 from matplotlib.patches import Ellipse
 import matplotlib.pyplot as plt
 
@@ -86,6 +86,65 @@ def astar(start_state, goal_state, heuristic_func, successors_func, obstacles_no
                 heapq.heappush(open_list, (successor_node.f(), id(successor_node), successor_node))
 
     return None  # No path found
+
+def astar_local(start_state, goal_state, heuristic_func, successors_func,
+                obstacles_noisy, obstacle_speeds, rect_obstacles, bounds, step):
+
+    tolerance = 0.5
+    open_list = []
+    closed_set = set()
+    g_score = {}
+
+    start_node = Node(state=start_state, g=0,
+                      h=heuristic_func(start_state, goal_state))
+
+    heapq.heappush(open_list, (start_node.f(), id(start_node), start_node))
+    g_score[start_state] = 0
+
+    while open_list:
+
+        _, _, current_node = heapq.heappop(open_list)
+        state = current_node.state
+
+        if heuristic_func(state, goal_state) < tolerance:
+            path = []
+            while current_node:
+                path.append(current_node.state)
+                current_node = current_node.parent
+            return path[::-1]
+
+        closed_set.add(state)
+
+        for successor_state, cost in successors_func(
+                state, bounds, step):
+
+            neighbor_state = tuple(successor_state)
+
+            if neighbor_state in closed_set:
+                continue
+
+            #f not is_collision_free(neighbor_state, obstacles_noisy, obstacle_speeds) or not is_collision_free_rect(neighbor_state, rect_obstacles):
+            if not is_collision_free_rect(neighbor_state, rect_obstacles):
+                continue
+
+            tentative_g = g_score[state] + cost
+
+            if (neighbor_state not in g_score) or (tentative_g < g_score[neighbor_state]):
+
+                g_score[neighbor_state] = tentative_g
+                h = heuristic_func(neighbor_state, goal_state)
+
+                successor_node = Node(
+                    state=neighbor_state,
+                    parent=current_node,
+                    g=tentative_g,
+                    h=h
+                )
+
+                heapq.heappush(open_list,
+                               (successor_node.f(), id(successor_node), successor_node))
+
+    return None
 
 # calculate h(n)
 def euclidean_distance(state, goal_state):
@@ -201,12 +260,62 @@ def main():
     obstacles_true      = np.array([[-18.0,-10.0], [18,-20], [18, 8], [22,26], [23,15], [-23,15], [5,5], [-40, -30], [15, -10], [10, 5], [-30, 0], [-20, -20], [0, 0], [-35, 3], [-26, -27], [2, -10]])
     # kalabalik platform
     obstacles_true      = np.array([[-18.0,-10.0], [18,-20], [18, 8], [22,26], [23,15], [-23,15], [5,5], [-40, -30], [15, -10], [10, 5], [-30, 0], [-20, -20], [0, 0], [-35, 3], [-26, -27], [2, -10], [11, -12], [-3, -3], [-45, 0], [-25, -25], [8, 10], [-35, 13], [-21, -17], [21, -10]])
+    
+    # extra kalabalik platform
+    # extra_obstacles = np.array([
+    # [-10, -5], [-12, 4], [-8, 8], [-6, -12], [-4, 15],
+    # [2, 12], [4, -8], [6, 18], [8, -15], [12, 6],
+    # [-14, -14], [-16, 10], [-20, 5], [-22, -8], [-24, 12],
+    # [14, 14], [16, -6], [20, 2], [24, -12], [26, 8]
+    # ])
+    # cluster1 = np.array([
+    # [-22, -22],
+    # [-21, -19],
+    # [-19, -23],
+    # [-18, -21],
+    # [-23, -18],
+    # [-20, -24]
+    # ])
+    # cluster2 = np.array([
+    # [18, -42],
+    # [21, -38],
+    # [23, -41],
+    # [19, -37],
+    # [24, -39],
+    # [17, -40]
+    # ])
+    # obstacles_true = np.vstack((obstacles_true, extra_obstacles,cluster1,cluster2))
+
     sigma               = 0.1  # 10 cm uncertainity
     obstacles_noisy     = obstacles_true + np.random.normal(0, sigma, obstacles_true.shape)
     # obstacle speeds
     obstacle_speeds     = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1]])
     # kalabalik platform
     obstacle_speeds     = np.array([[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1],[-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1]])
+    # extra kalabalik platform
+    # extra_speeds = np.array([
+    # [-0.1, 0.1], [-0.2, 0.2], [0.1, 0.2], [-0.2, -0.1], [0.1, -0.1],
+    # [-0.1, 0.1], [0.2, 0.1], [-0.1, 0.1], [-0.2, 0.1], [-0.2, 0.2],
+    # [0.1, -0.2], [-0.2, 0.1], [0.2, -0.1], [-0.1, -0.2], [0.1, 0.1],
+    # [-0.2, 0.2], [0.1, -0.1], [-0.1, 0.2], [0.2, -0.2], [-0.2, 0.1]
+    # ])
+    # extra_speeds_cluster = np.array([
+    # [-0.1, 0.1],
+    # [-0.2, 0.2],
+    # [0.1, 0.2],
+    # [-0.2, -0.1],
+    # [0.1, -0.1],
+    # [-0.1, 0.1],
+
+    # [0.2, 0.1],
+    # [-0.1, 0.1],
+    # [-0.2, 0.1],
+    # [-0.2, 0.2],
+    # [0.1, -0.2],
+    # [-0.2, 0.1]
+    # ])
+    # obstacle_speeds = np.vstack((obstacle_speeds, extra_speeds,extra_speeds_cluster))
+    
     obstacle_speeds     = obstacle_speeds * 80
 
     start_state = (-40, -40)
@@ -244,6 +353,23 @@ def main():
     #sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9])
     #kalabalik platform
     sizes = np.array([1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0, 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8, 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0])
+    # extra kalabalik platform
+    # sizes = np.array([
+    # 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0,
+    # 1.2, 1.8, 2.0, 1.8, 1.9, 1.4, 1.5, 1.8,
+    # 1.2, 1.5, 1.0, 1.3, 0.8, 1.6, 1.1, 1.0,
+
+    # # extra 20
+    # 1.3, 1.7, 1.1, 1.4, 0.9,
+    # 1.6, 1.2, 1.0, 1.5, 1.8,
+    # 2.0, 1.7, 1.3, 1.6, 1.2,
+    # 0.9, 1.4, 1.1, 1.9, 1.5
+    # ])
+    # extra_sizes_cluster = np.array([
+    # 1.6, 1.4, 1.8, 1.5, 1.7, 1.3,
+    # 1.9, 1.5, 1.6, 1.8, 1.4, 1.7
+    # ])
+    # sizes = np.concatenate((sizes, extra_sizes_cluster))
 
     # incorporate static size                          
     a_base = a0 * sizes 
@@ -303,3 +429,5 @@ if __name__ == "__main__":
     main()
 
 #ben sadece rectangle lardan kac dedim ona, rectangle'a gelmiyorsa yildiz sorun yok.
+
+#kendime not: Astar is designed for handling static obstacles, o yuzden ellipse'lere gittigi corner/node giriyor mu diye bakmiyor. 
